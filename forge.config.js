@@ -10,7 +10,10 @@ module.exports = {
   makers: [
     {
       name: "@electron-forge/maker-squirrel",
-      config: {},
+      config: {
+        authors: "Nate Williams, Austin Ashley, Fernando Gomez, Siddharth Rakshit",
+        description: "Desktop app for running mussel detection with an Electron frontend and Python backend.",
+      },
     },
     {
       name: "@electron-forge/maker-zip",

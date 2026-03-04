@@ -2,6 +2,8 @@
   "name": "mussel-counter-simple",
   "version": "0.1.0",
   "private": true,
+  "description": "Desktop app for running mussel detection with an Electron frontend and Python backend.",
+  "author": "Nate Williams, Austin Ashley, Fernando Gomez, Siddharth Rakshit",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron-forge start",

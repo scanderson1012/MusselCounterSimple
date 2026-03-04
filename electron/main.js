@@ -7,6 +7,8 @@ const path = require("node:path");
 const API_HOST = "127.0.0.1";
 const DEFAULT_API_PORT = 8000;
 const MAX_PORT_SCAN_COUNT = 40;
+const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
+const BACKEND_READINESS_POLL_MS = 500;
 const ROOT_DIR = path.resolve(__dirname, "..");
 const UI_INDEX_PATH = path.join(ROOT_DIR, "frontend", "index.html");
 
@@ -14,6 +16,12 @@ let backendProcess = null;
 let mainWindow = null;
 let backendPort = DEFAULT_API_PORT;
 let backendBaseUrl = `http://${API_HOST}:${DEFAULT_API_PORT}`;
+
+function waitMilliseconds(durationMilliseconds) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMilliseconds);
+  });
+}
 
 function getPythonCommand() {
   if (process.env.PYTHON_BIN) {
@@ -146,6 +154,35 @@ async function startBackendServer() {
   });
 }
 
+async function isBackendReady() {
+  try {
+    const response = await fetch(`${backendBaseUrl}/models`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForBackendReady() {
+  const startupDeadline = Date.now() + BACKEND_STARTUP_TIMEOUT_MS;
+
+  while (Date.now() < startupDeadline) {
+    if (!backendProcess) {
+      throw new Error("Backend process exited before becoming ready.");
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    if (await isBackendReady()) {
+      return;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await waitMilliseconds(BACKEND_READINESS_POLL_MS);
+  }
+
+  throw new Error("Backend did not become ready in time.");
+}
+
 function stopBackendServer() {
   if (!backendProcess) {
     return;
@@ -182,12 +219,7 @@ ipcMain.handle("backend:base-url", async () => {
 });
 
 ipcMain.handle("backend:is-ready", async () => {
-  try {
-    const response = await fetch(`${backendBaseUrl}/models`);
-    return response.ok;
-  } catch {
-    return false;
-  }
+  return isBackendReady();
 });
 
 ipcMain.handle("backend:request", async (_event, request) => {
@@ -285,6 +317,7 @@ ipcMain.handle("dialog:pick-images", async () => {
 app.whenReady().then(async () => {
   try {
     await startBackendServer();
+    await waitForBackendReady();
     createWindow();
   } catch (error) {
     process.stderr.write(`[backend] startup failed: ${String(error)}\n`);
