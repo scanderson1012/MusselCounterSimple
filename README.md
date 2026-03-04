@@ -7,12 +7,23 @@ Desktop app for running mussel detection with an Electron frontend and Python ba
 - Node.js 20+
 - Python 3.11+
 
-## Run Locally (Development)
+## Run Locally (Development on macOS/Linux)
 
 ```bash
-cd /Users/natewilliams/Desktop/VT/capstone/MusselCounterSimple
+cd MusselCounterSimple
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+npm ci
+npm start
+```
+
+## Run Locally (Development on Windows)
+
+```powershell
+cd MusselCounterSimple
+py -3 -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
 npm ci
 npm start
@@ -21,7 +32,7 @@ npm start
 ## Build macOS `.dmg` (on macOS)
 
 ```bash
-cd /Users/natewilliams/Desktop/VT/capstone/MusselCounterSimple
+cd MusselCounterSimple
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
@@ -32,7 +43,7 @@ find out/make -name "*.dmg"
 ## Build Windows `.exe` (on Windows)
 
 ```powershell
-cd C:\path\to\MusselCounterSimple
+cd MusselCounterSimple
 py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt -r requirements-build.txt
@@ -62,4 +73,3 @@ The workflow uploads:
 - `RELEASES`
 
 as an artifact named `windows-build-artifacts`.
-
