@@ -101,9 +101,10 @@ async function startBackendServer() {
       throw new Error(`Packaged backend executable not found: ${executablePath}`);
     }
     const backendDataDir = path.join(app.getPath("userData"), "backend");
+    const packagedWorkingDirectory = process.resourcesPath;
 
     backendProcess = spawn(executablePath, [], {
-      cwd: ROOT_DIR,
+      cwd: packagedWorkingDirectory,
       env: {
         ...process.env,
         MUSSEL_API_HOST: API_HOST,
