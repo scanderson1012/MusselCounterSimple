@@ -1,5 +1,7 @@
 # Mussel Counter
 
+Made by Team Mussel Memory: Nate Williams, Austin Ashley, Fernando Gomez, and Siddharth Rakshit for a CMDA capstone project under the Virginia Tech Department of Fish and Wildlife Conservation.
+
 ## Why We Made This
 
 This project was built to remove a major research bottleneck for juvenile freshwater mussel studies.  
