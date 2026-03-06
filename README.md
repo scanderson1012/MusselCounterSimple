@@ -1,4 +1,5 @@
 # Mussel Counter
+Download: https://github.com/natewill/MusselCounterSimple/releases/tag/v0.1.0
 
 Made by Team Mussel Memory: Nate Williams, Austin Ashley, Fernando Gomez, and Siddharth Rakshit for a CMDA capstone project under the Virginia Tech Department of Fish and Wildlife Conservation.
 
