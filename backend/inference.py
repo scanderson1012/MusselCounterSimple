@@ -18,13 +18,15 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
-
+# Maps RCNN class IDs to app labels used by detections/counts.
+# Background class (0) is intentionally excluded.
 RCNN_LABELS = {
     1: "live",
     2: "dead",
 }
 # Cache key: absolute model path.
 # Cache value: (file modified_time, loaded_model, device).
+# Caches loaded model so app doesn't reload weights from disk for every run.
 MODEL_CACHE: dict[str, tuple[float, Any, Any]] = {}
 
 
@@ -97,6 +99,8 @@ def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
     """Return cached `(model, device)` and reload only when model file changed.
 
     The cache invalidates using file modified-time (`st_mtime`).
+    Device comes from model load-time selection: GPU (`cuda`) when available,
+    otherwise CPU.
     """
     model_path = _model_file_name_to_absolute_path(model_file_name)
     cache_key = str(model_path)
@@ -120,11 +124,13 @@ def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) ->
     model, device = model_device_tuple
     transform = transforms.ToTensor()
 
+    # TorchVision "detectors" are object-detection models (for example, Faster R-CNN).
+    # A "tensor" is PyTorch's numeric image array format.
+    # The detector API expects a list of image tensors, and returns a list of prediction dicts.
     # PIL -> tensor on target device.
     image = Image.open(image_path).convert("RGB")
     tensor = transform(image).to(device)
 
-    # TorchVision detectors expect a list of tensors and return a list of dicts.
     with torch.no_grad():
         prediction = model([tensor])[0]
 

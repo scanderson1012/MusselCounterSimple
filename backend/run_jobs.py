@@ -60,6 +60,8 @@ def create_run_job(
     global _RUN_JOB_DATA
 
     # Generate a stable opaque ID for frontend polling.
+    # Polling means the frontend repeatedly calls the status endpoint
+    # (every few seconds) until this background run finishes.
     run_job_id = uuid4().hex
     run_job_data: dict[str, Any] = {
         "run_job_id": run_job_id,

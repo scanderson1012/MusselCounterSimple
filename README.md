@@ -10,7 +10,7 @@ This project was built to remove a major research bottleneck for juvenile freshw
 Before this tool, researchers had to manually inspect, classify, and count thousands of mussels in microscope images, which took extensive time and effort.  
 Mussel Counter helps automate that process by running a computer vision model (Fast R-CNN) so researchers can spend less time on manual counting and more time on conservation and analysis work.
 
-Desktop app built with Electron, a simple HTML/CSS/JS frontend, a FastAPI backend, and a SQL (SQLite) database.
+Desktop app built with Electron, a React frontend, a FastAPI backend, and a SQL (SQLite) database.
 
 ### 1) Petri Dish Context
 

@@ -21,7 +21,7 @@ const MAX_PORT_SCAN_COUNT = 40;
 const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
 const BACKEND_READINESS_POLL_MS = 500;
 const ROOT_DIR = path.resolve(__dirname, "..");
-const UI_INDEX_PATH = path.join(ROOT_DIR, "frontend", "index.html");
+const UI_INDEX_PATH = path.join(ROOT_DIR, "frontend", "dist", "index.html");
 
 let backendProcess = null;
 let mainWindow = null;
