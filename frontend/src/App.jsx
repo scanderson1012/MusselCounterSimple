@@ -145,18 +145,18 @@ function App() {
 
   // Keep route state in sync with browser hash changes.
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleRouteChange = () => {
       setCurrentRoute(parseRoute(window.location.hash));
     };
 
     if (!window.location.hash) {
       window.location.hash = "/";
     }
-    handleHashChange();
+    handleRouteChange();
 
-    window.addEventListener("hashchange", handleHashChange);
+    window.addEventListener("hashchange", handleRouteChange);
     return () => {
-      window.removeEventListener("hashchange", handleHashChange);
+      window.removeEventListener("hashchange", handleRouteChange);
     };
   }, []);
 

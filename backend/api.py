@@ -23,7 +23,7 @@ from pydantic import ConfigDict
 from pydantic import Field
 
 from backend.database import create_run
-from backend.database import get_connection
+from backend.database import get_database_connection
 from backend.database import get_image_file_metadata_from_database
 from backend.database import get_run_model_file_name
 from backend.database import get_run_info_from_detection_id
@@ -92,9 +92,9 @@ def _run_job_in_background(
     `completed` or `failed`.
     """
     try:
-        with get_connection() as connection:
+        with get_database_connection() as database_connection:
             run_rcnn_inference_for_run_images(
-                connection=connection,
+                database_connection=database_connection,
                 run_image_ids=run_image_ids_to_process,
                 model_file_name=model_file_name,
                 threshold_score=threshold_score,
@@ -104,9 +104,9 @@ def _run_job_in_background(
                     total_images,
                 ),
             )
-            update_run_mussel_count(connection, run_id)
-            connection.commit()
-            run_data = get_run_from_database(connection, run_id)
+            update_run_mussel_count(database_connection, run_id)
+            database_connection.commit()
+            run_data = get_run_from_database(database_connection, run_id)
 
         if run_data is None:
             raise RuntimeError("Failed to load run after inference completion")
@@ -154,32 +154,32 @@ def create_or_update_run_and_do_inference(
     is_running_on_new_images_only = True
     run_data: dict[str, Any] | None = None
 
-    with get_connection() as connection:
+    with get_database_connection() as database_connection:
         # Step 1: create a run or load/update existing run metadata.
         if request.run_id is None:
-            run_id = create_run(connection, request.model_file_name, request.threshold_score)
+            run_id = create_run(database_connection, request.model_file_name, request.threshold_score)
             model_changed = False
         else:
-            if not run_exists(connection, request.run_id):
+            if not run_exists(database_connection, request.run_id):
                 raise HTTPException(status_code=404, detail="Run not found")
             run_id = request.run_id
-            requested_run_model_file_name = get_run_model_file_name(connection, run_id)
+            requested_run_model_file_name = get_run_model_file_name(database_connection, run_id)
             model_changed = requested_run_model_file_name != request.model_file_name
             if model_changed:
-                update_run_model_file_name(connection, run_id, request.model_file_name)
+                update_run_model_file_name(database_connection, run_id, request.model_file_name)
                 is_running_on_new_images_only = False
 
-        update_run_threshold(connection, run_id, request.threshold_score)
+        update_run_threshold(database_connection, run_id, request.threshold_score)
 
         # Step 2: ingest image paths and link uploaded image IDs to this run.
         for image_path in request.image_paths:
             try:
-                image = ingest_image_into_database(connection, image_path)
+                image = ingest_image_into_database(database_connection, image_path)
             except FileNotFoundError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
 
             run_image_id, inserted_without_error = link_image_to_run(
-                connection, run_id, image["image_id"]
+                database_connection, run_id, image["image_id"]
             )
             if not inserted_without_error:
                 skipped_images.append(image_path)
@@ -188,13 +188,13 @@ def create_or_update_run_and_do_inference(
             new_images_for_this_run.append(run_image_id)
 
         for image_id in request.image_ids:
-            image_file_metadata = get_image_file_metadata_from_database(connection, image_id)
+            image_file_metadata = get_image_file_metadata_from_database(database_connection, image_id)
             if image_file_metadata is None:
                 invalid_image_ids.append(image_id)
                 continue
 
             run_image_id, inserted_without_error = link_image_to_run(
-                connection,
+                database_connection,
                 run_id,
                 int(image_file_metadata["id"]),
             )
@@ -206,14 +206,14 @@ def create_or_update_run_and_do_inference(
 
         # Step 3: decide inference scope based on model change vs newly added images.
         if model_changed:
-            run_image_ids_to_process = list_run_image_ids(connection, run_id)
+            run_image_ids_to_process = list_run_image_ids(database_connection, run_id)
         else:
             run_image_ids_to_process = new_images_for_this_run
 
-        update_run_mussel_count(connection, run_id)
-        connection.commit()
+        update_run_mussel_count(database_connection, run_id)
+        database_connection.commit()
         if not run_image_ids_to_process:
-            run_data = get_run_from_database(connection, run_id)
+            run_data = get_run_from_database(database_connection, run_id)
 
     # Step 4: create run-job tracking data returned to frontend for progress polling.
     try:
@@ -276,16 +276,16 @@ def recalculate_mussel_counts(request: RecalculateRequest) -> dict[str, Any]:
     This endpoint does not run the model. It re-applies the provided threshold to
     existing detections and refreshes run-level totals in the database.
     """
-    with get_connection() as connection:
-        if not run_exists(connection, request.run_id):
+    with get_database_connection() as database_connection:
+        if not run_exists(database_connection, request.run_id):
             raise HTTPException(status_code=404, detail="Run not found")
 
-        update_run_threshold(connection, request.run_id, request.threshold_score)
+        update_run_threshold(database_connection, request.run_id, request.threshold_score)
         recalculate_run_mussel_counts_from_detections(
-            connection, request.run_id, request.threshold_score
+            database_connection, request.run_id, request.threshold_score
         )
-        connection.commit()
-        run_data = get_run_from_database(connection, request.run_id)
+        database_connection.commit()
+        run_data = get_run_from_database(database_connection, request.run_id)
 
     if run_data is None:
         raise HTTPException(status_code=500, detail="Failed to load run")
@@ -305,8 +305,8 @@ def edit_detection_in_database(detection_id: int, request: DetectionPatchRequest
     if not fields_to_update:
         raise HTTPException(status_code=400, detail="No detection fields provided")
 
-    with get_connection() as connection:
-        run_information = get_run_info_from_detection_id(connection, detection_id)
+    with get_database_connection() as database_connection:
+        run_information = get_run_info_from_detection_id(database_connection, detection_id)
         if run_information is None:
             raise HTTPException(status_code=404, detail="Detection not found")
 
@@ -314,15 +314,15 @@ def edit_detection_in_database(detection_id: int, request: DetectionPatchRequest
             fields_to_update["is_deleted"] = 1 if fields_to_update["is_deleted"] else 0
         fields_to_update["is_edited"] = 1
 
-        update_detection_fields(connection, detection_id, fields_to_update)
+        update_detection_fields(database_connection, detection_id, fields_to_update)
         recalculate_run_image_mussel_counts_from_detections(
-            connection,
+            database_connection,
             run_image_id=int(run_information["run_image_id"]),
             threshold_score=float(run_information["threshold_score"]),
         )
-        update_run_mussel_count(connection, int(run_information["run_id"]))
-        connection.commit()
-        run_data = get_run_from_database(connection, int(run_information["run_id"]))
+        update_run_mussel_count(database_connection, int(run_information["run_id"]))
+        database_connection.commit()
+        run_data = get_run_from_database(database_connection, int(run_information["run_id"]))
 
     if run_data is None:
         raise HTTPException(status_code=500, detail="Failed to load run")
@@ -333,17 +333,17 @@ def edit_detection_in_database(detection_id: int, request: DetectionPatchRequest
 @router.delete("/runs/{run_id}/images/{run_image_id}")
 def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
     """Remove one image link from a run and recompute run totals."""
-    with get_connection() as connection:
-        if not run_exists(connection, run_id):
+    with get_database_connection() as database_connection:
+        if not run_exists(database_connection, run_id):
             raise HTTPException(status_code=404, detail="Run not found")
 
-        deleted = unlink_image_from_run(connection, run_id, run_image_id)
+        deleted = unlink_image_from_run(database_connection, run_id, run_image_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Image not found in run")
 
-        update_run_mussel_count(connection, run_id)
-        connection.commit()
-        run_data = get_run_from_database(connection, run_id)
+        update_run_mussel_count(database_connection, run_id)
+        database_connection.commit()
+        run_data = get_run_from_database(database_connection, run_id)
 
     if run_data is None:
         raise HTTPException(status_code=500, detail="Failed to load run")
@@ -354,15 +354,15 @@ def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
 @router.get("/runs")
 def list_runs() -> list[dict[str, Any]]:
     """Return all runs for the history view, newest first."""
-    with get_connection() as connection:
-        return list_runs_from_database(connection)
+    with get_database_connection() as database_connection:
+        return list_runs_from_database(database_connection)
 
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: int) -> dict[str, Any]:
     """Return one run with nested run images and detections."""
-    with get_connection() as connection:
-        run_data = get_run_from_database(connection, run_id)
+    with get_database_connection() as database_connection:
+        run_data = get_run_from_database(database_connection, run_id)
     if run_data is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run_data
@@ -385,7 +385,7 @@ def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="No files provided")
 
     uploaded_images: list[dict[str, Any]] = []
-    with get_connection() as connection:
+    with get_database_connection() as database_connection:
         for uploaded_file in files:
             displayed_file_name = uploaded_file.filename or "uploaded_image"
             file_bytes = uploaded_file.file.read()
@@ -394,13 +394,13 @@ def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"Empty file: {displayed_file_name}")
 
             uploaded_image = ingest_image_into_database(
-                connection,
+                database_connection,
                 displayed_file_name=displayed_file_name,
                 file_bytes=file_bytes,
             )
             uploaded_images.append(uploaded_image)
 
-        connection.commit()
+        database_connection.commit()
 
     return {"images": uploaded_images}
 
@@ -408,8 +408,8 @@ def upload_images(files: list[UploadFile] = File(...)) -> dict[str, Any]:
 @router.get("/images/{image_id}", response_class=FileResponse)
 def get_image(image_id: int) -> FileResponse:
     """Serve image bytes for one stored image ID."""
-    with get_connection() as connection:
-        image_file_metadata = get_image_file_metadata_from_database(connection, image_id)
+    with get_database_connection() as database_connection:
+        image_file_metadata = get_image_file_metadata_from_database(database_connection, image_id)
 
     if image_file_metadata is None:
         raise HTTPException(status_code=404, detail="Image not found")

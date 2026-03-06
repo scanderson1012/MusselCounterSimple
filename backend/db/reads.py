@@ -6,10 +6,10 @@ import sqlite3
 
 
 def get_image_file_metadata_from_database(
-    connection: sqlite3.Connection, image_id: int
+    database_connection: sqlite3.Connection, image_id: int
 ) -> dict[str, Any] | None:
     """Return stored file metadata for one image ID, or `None` if missing."""
-    image_file_metadata = connection.execute(
+    image_file_metadata = database_connection.execute(
         """
         SELECT
             id,
@@ -25,12 +25,12 @@ def get_image_file_metadata_from_database(
     return dict(image_file_metadata)
 
 
-def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
+def get_run_from_database(database_connection: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
     """Return one full run payload (run + images + detections).
 
     This is the detailed shape used by the run-detail frontend page.
     """
-    run_from_database = connection.execute(
+    run_from_database = database_connection.execute(
         """
         SELECT
             id,
@@ -55,7 +55,7 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
     )
 
     # Load all images linked to this run, in stable insertion order.
-    images_from_database = connection.execute(
+    images_from_database = database_connection.execute(
         """
         SELECT
             run_images.id AS run_image_id,
@@ -81,7 +81,7 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
             image_data["live_mussel_count"] + image_data["dead_mussel_count"]
         )
         # Attach detections for each run-image row.
-        detections_from_database = connection.execute(
+        detections_from_database = database_connection.execute(
             """
             SELECT
                 id,
@@ -110,9 +110,9 @@ def get_run_from_database(connection: sqlite3.Connection, run_id: int) -> dict[s
     return run_data
 
 
-def list_runs_from_database(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_runs_from_database(database_connection: sqlite3.Connection) -> list[dict[str, Any]]:
     """Return run summary rows for the history/collections view."""
-    run_summaries_from_database = connection.execute(
+    run_summaries_from_database = database_connection.execute(
         """
         SELECT
             runs.id,

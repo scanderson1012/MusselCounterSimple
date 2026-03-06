@@ -163,7 +163,7 @@ def _run_rcnn_inference(model_device_tuple: tuple[Any, Any], image_path: str) ->
 
 
 def run_rcnn_inference_for_run_images(
-    connection: sqlite3.Connection,
+    database_connection: sqlite3.Connection,
     run_image_ids: list[int],
     model_file_name: str,
     threshold_score: float,
@@ -185,7 +185,7 @@ def run_rcnn_inference_for_run_images(
     model_device_tuple = _get_model_device(model_file_name)
     placeholders = ",".join(["?"] * len(run_image_ids))
     # Pull run-image rows with physical file path for inference.
-    run_images_from_database = connection.execute(
+    run_images_from_database = database_connection.execute(
         f"""
         SELECT
             run_images.id AS run_image_id,
@@ -205,7 +205,7 @@ def run_rcnn_inference_for_run_images(
         detections = _run_rcnn_inference(model_device_tuple, image_path)
 
         # Replace prior detections so reruns are deterministic per run-image row.
-        connection.execute(
+        database_connection.execute(
             """
             DELETE FROM detections
             WHERE run_image_id = ?
@@ -218,7 +218,7 @@ def run_rcnn_inference_for_run_images(
 
         for detection in detections:
             # Persist every raw detection; threshold only affects aggregate counters.
-            connection.execute(
+            database_connection.execute(
                 """
                 INSERT INTO detections (
                     run_image_id,
@@ -251,7 +251,7 @@ def run_rcnn_inference_for_run_images(
                     dead_mussel_count += 1
 
         # Store per-image counters used by run-level aggregate queries.
-        connection.execute(
+        database_connection.execute(
             """
             UPDATE run_images
             SET

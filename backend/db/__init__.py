@@ -1,1 +1,1 @@
-"""Database helper package for connection, run, detection, and read operations."""
+"""Database helper package for database_connection, run, detection, and read operations."""

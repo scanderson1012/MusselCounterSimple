@@ -41,13 +41,13 @@ def _image_record_to_dict(
 
 
 def ingest_image_into_database(
-    connection: sqlite3.Connection,
+    database_connection: sqlite3.Connection,
     image_path: str | Path | None = None,
     displayed_file_name: str | None = None,
     file_bytes: bytes | None = None,
 ) -> dict[str, Any]:
     """Ingest one image into app storage and deduplicate by file hash."""
-    connection.row_factory = sqlite3.Row
+    database_connection.row_factory = sqlite3.Row
 
     # Support two input modes:
     # 1) file path from local disk, or
@@ -67,7 +67,7 @@ def ingest_image_into_database(
         sha_256_file_hash = hashlib.sha256(file_bytes).hexdigest()
 
     # Deduplicate globally by file content hash.
-    existing_image_from_database = connection.execute(
+    existing_image_from_database = database_connection.execute(
         """
         SELECT id, displayed_file_name, stored_path, sha_256_file_hash, created_at
         FROM images
@@ -93,7 +93,7 @@ def ingest_image_into_database(
             stored_path.write_bytes(file_bytes)
 
     # Insert image metadata row and return standardized API data.
-    inserted_image_from_database = connection.execute(
+    inserted_image_from_database = database_connection.execute(
         """
         INSERT INTO images (displayed_file_name, stored_path, sha_256_file_hash)
         VALUES (?, ?, ?)

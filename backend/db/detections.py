@@ -8,10 +8,10 @@ from backend.db.runs import update_run_mussel_count
 
 
 def recalculate_run_mussel_counts_from_detections(
-    connection: sqlite3.Connection, run_id: int, threshold_score: float
+    database_connection: sqlite3.Connection, run_id: int, threshold_score: float
 ) -> None:
     """Recompute all run-image counts for one run, then refresh run totals."""
-    run_images_from_database = connection.execute(
+    run_images_from_database = database_connection.execute(
         """
         SELECT id
         FROM run_images
@@ -25,14 +25,14 @@ def recalculate_run_mussel_counts_from_detections(
         run_image_id = int(run_image_from_database["id"])
         # Recompute each run-image row independently from persisted detections.
         recalculate_run_image_mussel_counts_from_detections(
-            connection, run_image_id, threshold_score
+            database_connection, run_image_id, threshold_score
         )
 
-    update_run_mussel_count(connection, run_id)
+    update_run_mussel_count(database_connection, run_id)
 
 
 def recalculate_run_image_mussel_counts_from_detections(
-    connection: sqlite3.Connection, run_image_id: int, threshold_score: float
+    database_connection: sqlite3.Connection, run_image_id: int, threshold_score: float
 ) -> None:
     """Recompute one run-image live/dead counts from stored detections.
 
@@ -40,7 +40,7 @@ def recalculate_run_image_mussel_counts_from_detections(
     - Ignore `is_deleted = 1` rows.
     - Count only detections with `confidence_score >= threshold_score`.
     """
-    mussel_counts_from_database = connection.execute(
+    mussel_counts_from_database = database_connection.execute(
         """
         SELECT
             SUM(
@@ -63,7 +63,7 @@ def recalculate_run_image_mussel_counts_from_detections(
 
     live_mussel_count = int(mussel_counts_from_database["live_mussel_count"] or 0)
     dead_mussel_count = int(mussel_counts_from_database["dead_mussel_count"] or 0)
-    connection.execute(
+    database_connection.execute(
         """
         UPDATE run_images
         SET
@@ -76,10 +76,10 @@ def recalculate_run_image_mussel_counts_from_detections(
 
 
 def get_run_info_from_detection_id(
-    connection: sqlite3.Connection, detection_id: int
+    database_connection: sqlite3.Connection, detection_id: int
 ) -> dict[str, Any] | None:
     """Return run context for one detection ID, or `None` if not found."""
-    run_information_from_database = connection.execute(
+    run_information_from_database = database_connection.execute(
         """
         SELECT
             detections.id AS detection_id,
@@ -99,7 +99,7 @@ def get_run_info_from_detection_id(
 
 
 def update_detection_fields(
-    connection: sqlite3.Connection, detection_id: int, fields_to_update: dict[str, Any]
+    database_connection: sqlite3.Connection, detection_id: int, fields_to_update: dict[str, Any]
 ) -> None:
     """Update one detection using a validated field subset.
 
@@ -120,7 +120,7 @@ def update_detection_fields(
     # Build dynamic assignment list from validated field names.
     assignments = ", ".join(f"{field_name} = ?" for field_name in fields_to_update.keys())
     values = list(fields_to_update.values()) + [detection_id]
-    connection.execute(
+    database_connection.execute(
         f"""
         UPDATE detections
         SET {assignments}

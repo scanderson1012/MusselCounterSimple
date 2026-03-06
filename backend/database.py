@@ -1,6 +1,6 @@
 """Compatibility exports for split database modules."""
 
-from backend.db.connection import get_connection
+from backend.db.connection import get_database_connection
 from backend.db.detections import get_run_info_from_detection_id
 from backend.db.detections import recalculate_run_mussel_counts_from_detections
 from backend.db.detections import recalculate_run_image_mussel_counts_from_detections
@@ -20,7 +20,7 @@ from backend.db.runs import update_run_threshold
 
 __all__ = [
     "create_run",
-    "get_connection",
+    "get_database_connection",
     "get_image_file_metadata_from_database",
     "get_run_info_from_detection_id",
     "get_run_from_database",
