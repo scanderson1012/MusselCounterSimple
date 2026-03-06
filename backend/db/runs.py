@@ -88,7 +88,7 @@ def update_run_mussel_count(database_connection: sqlite3.Connection, run_id: int
     )
 
 
-def get_run_model_file_name(database_connection: sqlite3.Connection, run_id: int) -> str | None:
+def get_model_name_from_run_id(database_connection: sqlite3.Connection, run_id: int) -> str | None:
     """Return the run's current `model_file_name`, or `None` if run is missing."""
     model_file_name_from_database = database_connection.execute(
         """
@@ -103,7 +103,7 @@ def get_run_model_file_name(database_connection: sqlite3.Connection, run_id: int
     return model_file_name_from_database["model_file_name"]
 
 
-def update_run_model_file_name(
+def update_this_runs_model(
     database_connection: sqlite3.Connection, run_id: int, model_file_name: str
 ) -> None:
     """Set `model_file_name` for one run and touch `updated_at`."""

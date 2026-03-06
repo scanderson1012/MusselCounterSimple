@@ -25,7 +25,7 @@ from pydantic import Field
 from backend.database import create_run
 from backend.database import get_database_connection
 from backend.database import get_image_file_metadata_from_database
-from backend.database import get_run_model_file_name
+from backend.database import get_model_name_from_run_id
 from backend.database import get_run_info_from_detection_id
 from backend.database import get_run_from_database
 from backend.database import link_image_to_run
@@ -36,7 +36,7 @@ from backend.database import recalculate_run_mussel_counts_from_detections
 from backend.database import run_exists
 from backend.database import unlink_image_from_run
 from backend.database import update_detection_fields
-from backend.database import update_run_model_file_name
+from backend.database import update_this_runs_model
 from backend.database import update_run_mussel_count
 from backend.database import update_run_threshold
 from backend.image_ingest import ingest_image_into_database
@@ -81,7 +81,7 @@ def _run_job_in_background(
     run_job_id: str,
     run_id: int,
     run_image_ids_to_process: list[int],
-    model_file_name: str,
+    requested_model: str,
     threshold_score: float,
 ) -> None:
     """Run inference for one run job and finalize its status.
@@ -96,7 +96,7 @@ def _run_job_in_background(
             run_rcnn_inference_for_run_images(
                 database_connection=database_connection,
                 run_image_ids=run_image_ids_to_process,
-                model_file_name=model_file_name,
+                model_file_name=requested_model,
                 threshold_score=threshold_score,
                 on_run_image_processed=lambda processed_images, total_images: update_run_job_progress(
                     run_job_id,
@@ -136,7 +136,7 @@ def create_or_update_run_and_do_inference(
         raise HTTPException(
             status_code=409,
             detail=(
-                "A run job is already running. "
+                "A model is already running. "
                 f"run_job_id={current_run_job_data['run_job_id']}"
             ),
         )
@@ -153,20 +153,19 @@ def create_or_update_run_and_do_inference(
     new_images_for_this_run: list[int] = []
     is_running_on_new_images_only = True
     run_data: dict[str, Any] | None = None
+    requested_model = request.model_file_name
 
     with get_database_connection() as database_connection:
         # Step 1: create a run or load/update existing run metadata.
         if request.run_id is None:
-            run_id = create_run(database_connection, request.model_file_name, request.threshold_score)
-            model_changed = False
+            run_id = create_run(database_connection, requested_model, request.threshold_score)
+            using_new_model = False
         else:
-            if not run_exists(database_connection, request.run_id):
-                raise HTTPException(status_code=404, detail="Run not found")
             run_id = request.run_id
-            requested_run_model_file_name = get_run_model_file_name(database_connection, run_id)
-            model_changed = requested_run_model_file_name != request.model_file_name
-            if model_changed:
-                update_run_model_file_name(database_connection, run_id, request.model_file_name)
+            current_model = get_model_name_from_run_id(database_connection, run_id)
+            using_new_model = current_model != requested_model
+            if using_new_model:
+                update_this_runs_model(database_connection, run_id, requested_model)
                 is_running_on_new_images_only = False
 
         update_run_threshold(database_connection, run_id, request.threshold_score)
@@ -205,7 +204,7 @@ def create_or_update_run_and_do_inference(
             new_images_for_this_run.append(run_image_id)
 
         # Step 3: decide inference scope based on model change vs newly added images.
-        if model_changed:
+        if using_new_model:
             run_image_ids_to_process = list_run_image_ids(database_connection, run_id)
         else:
             run_image_ids_to_process = new_images_for_this_run
@@ -223,7 +222,7 @@ def create_or_update_run_and_do_inference(
             skipped_images=skipped_images,
             skipped_image_ids=skipped_image_ids,
             invalid_image_ids=invalid_image_ids,
-            model_changed=model_changed,
+            model_changed=using_new_model,
             is_running_on_new_images_only=is_running_on_new_images_only,
             processed_run_image_ids=run_image_ids_to_process,
         )
@@ -247,7 +246,7 @@ def create_or_update_run_and_do_inference(
             run_job_data["run_job_id"],
             run_id,
             run_image_ids_to_process,
-            request.model_file_name,
+            requested_model,
             request.threshold_score,
         ),
         daemon=True,

@@ -9,13 +9,13 @@ from backend.db.reads import get_image_file_metadata_from_database
 from backend.db.reads import get_run_from_database
 from backend.db.reads import list_runs_from_database
 from backend.db.runs import create_run
-from backend.db.runs import get_run_model_file_name
+from backend.db.runs import get_model_name_from_run_id
 from backend.db.runs import link_image_to_run
 from backend.db.runs import list_run_image_ids
 from backend.db.runs import unlink_image_from_run
 from backend.db.runs import run_exists
 from backend.db.runs import update_run_mussel_count
-from backend.db.runs import update_run_model_file_name
+from backend.db.runs import update_this_runs_model
 from backend.db.runs import update_run_threshold
 
 __all__ = [
@@ -24,7 +24,7 @@ __all__ = [
     "get_image_file_metadata_from_database",
     "get_run_info_from_detection_id",
     "get_run_from_database",
-    "get_run_model_file_name",
+    "get_model_name_from_run_id",
     "link_image_to_run",
     "list_run_image_ids",
     "list_runs_from_database",
@@ -34,6 +34,6 @@ __all__ = [
     "update_detection_fields",
     "update_run_mussel_count",
     "unlink_image_from_run",
-    "update_run_model_file_name",
+    "update_this_runs_model",
     "update_run_threshold",
 ]
