@@ -100,7 +100,7 @@ You can review past runs and adjust threshold values for those runs as needed.
 
 ## Edit The Database (Terminal)
 
-If you want to learn more about SQLite, see the official docs: [https://www.sqlite.org/docs.html](https://www.sqlite.org/docs.html)
+The database uses SQL with SQLite.
 
 Quick terminal usage:
 
