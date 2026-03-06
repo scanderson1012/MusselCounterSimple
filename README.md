@@ -109,7 +109,7 @@ npm run make:desktop -- --platform=darwin --arch=arm64
 find out/make -name "*.dmg"
 ```
 
-## Build Windows `.exe` (on Windows)
+## Build Windows `.zip` (Portable, on Windows)
 
 ```powershell
 # while in /MusselCounterSimple
@@ -120,11 +120,13 @@ npm ci
 npm run make:desktop
 ```
 
-Windows installer output will be under:
+Windows ZIP output will be under:
 
 ```text
-out\make\squirrel.windows\...
+out\make\zip\win32\...
 ```
+
+To use it, extract the ZIP on Windows and run `mussel-counter-simple.exe` from the extracted folder.
 
 ## How To Use The App
 

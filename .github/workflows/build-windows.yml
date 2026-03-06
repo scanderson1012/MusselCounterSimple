@@ -36,13 +36,11 @@ jobs:
       - name: Build backend + Windows distributables
         run: npm run make:desktop
 
-      - name: Upload Windows installer artifacts
+      - name: Upload Windows ZIP artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build-artifacts
           if-no-files-found: error
           retention-days: 14
           path: |
-            out/make/squirrel.windows/**/*.exe
-            out/make/squirrel.windows/**/*.nupkg
-            out/make/squirrel.windows/**/RELEASES
+            out/make/zip/win32/**/*.zip
