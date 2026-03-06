@@ -1,5 +1,3 @@
-![Sponsor and Advisor](docs/sponsor-advisor.png)
-
 # Mussel Counter
 
 ## Why We Made This
@@ -9,6 +7,8 @@ Before this tool, researchers had to manually inspect, classify, and count thous
 Mussel Counter helps automate that process by running a computer vision model (Fast R-CNN) so researchers can spend less time on manual counting and more time on conservation and analysis work.
 
 Desktop app for running mussel detection with an Electron frontend and Python backend.
+
+![Sponsor and Advisor](docs/sponsor-advisor.png)
 
 ## Prerequisites
 
