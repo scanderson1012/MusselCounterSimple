@@ -6,18 +6,23 @@
   "author": "Nate Williams, Austin Ashley, Fernando Gomez, Siddharth Rakshit",
   "main": "electron/main.js",
   "scripts": {
-    "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
+    "frontend:build": "vite build --config frontend/vite.config.mjs",
+    "start": "npm run frontend:build && electron-forge start",
+    "package": "npm run frontend:build && electron-forge package",
+    "make": "npm run frontend:build && electron-forge make",
     "backend:build": "node backend/build_backend_runner.js",
-    "package:desktop": "npm run backend:build && electron-forge package",
-    "make:desktop": "npm run backend:build && electron-forge make"
+    "package:desktop": "npm run frontend:build && npm run backend:build && electron-forge package",
+    "make:desktop": "npm run frontend:build && npm run backend:build && electron-forge make"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.8.1",
     "@electron-forge/maker-dmg": "^7.11.1",
     "@electron-forge/maker-squirrel": "^7.8.1",
     "@electron-forge/maker-zip": "^7.8.1",
-    "electron": "^28.3.3"
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^28.3.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "vite": "^7.2.0"
   }
 }
