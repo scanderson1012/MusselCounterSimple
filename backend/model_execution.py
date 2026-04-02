@@ -24,6 +24,22 @@ RCNN_LABELS = {
     1: "live",
     2: "dead",
 }
+
+# Whitelisted TorchVision Faster R-CNN builders.
+_SUPPORTED_ARCHS: dict[str, Any] = {
+    "fasterrcnn_resnet50_fpn": torchvision.models.detection.fasterrcnn_resnet50_fpn,
+    "fasterrcnn_resnet50_fpn_v2": torchvision.models.detection.fasterrcnn_resnet50_fpn_v2,
+    "fasterrcnn_mobilenet_v3_large_fpn": torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn,
+}
+
+# Override arch/num_classes to match the checkpoint being loaded.
+# arch must be a key in _SUPPORTED_ARCHS.
+# num_classes must include the background class (e.g. 3 = background + live + dead).
+MODEL_CONFIG: dict[str, Any] = {
+    "arch": "fasterrcnn_resnet50_fpn_v2",
+    "num_classes": 3,
+}
+
 # Cache key: absolute model path.
 # Cache value: (file modified_time, loaded_model, device).
 # Caches loaded model so app doesn't reload weights from disk for every run.
@@ -44,6 +60,24 @@ def _model_file_name_to_absolute_path(model_file_name: str) -> Path:
     if not model_path.is_file():
         raise FileNotFoundError(f"Model file not found: {model_path}")
     return model_path
+
+
+def _build_model(config: dict[str, Any]) -> Any:
+    """Instantiate a TorchVision Faster R-CNN model from a config dict.
+
+    Config keys:
+    - ``arch``: architecture name; must be a key in ``_SUPPORTED_ARCHS``.
+    - ``num_classes``: total output classes including background.
+    """
+    arch = config.get("arch", "fasterrcnn_resnet50_fpn_v2")
+    num_classes = config.get("num_classes", 3)
+    builder = _SUPPORTED_ARCHS.get(arch)
+    if builder is None:
+        raise ValueError(
+            f"Unsupported architecture: {arch!r}. "
+            f"Supported architectures: {sorted(_SUPPORTED_ARCHS)}"
+        )
+    return builder(weights=None, weights_backbone=None, num_classes=num_classes)
 
 
 def _load_model(model_path: Path) -> tuple[Any, Any]:
@@ -79,12 +113,7 @@ def _load_model(model_path: Path) -> tuple[Any, Any]:
     for key, value in state_dict.items():
         normalized_state_dict[key.removeprefix("module.")] = value
 
-    # This project uses a fixed 3-class head: background, live, dead.
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
-        weights=None,
-        weights_backbone=None,
-        num_classes=3,
-    )
+    model = _build_model(MODEL_CONFIG)
     try:
         model.load_state_dict(normalized_state_dict)
     except Exception as error:
