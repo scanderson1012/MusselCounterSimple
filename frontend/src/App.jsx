@@ -16,19 +16,19 @@ import useDetectionCanvas from "./hooks/useDetectionCanvas.js";
 import useRunActions from "./hooks/useRunActions.js";
 import HistoryView from "./views/HistoryView.jsx";
 import ImageDetailView from "./views/ImageDetailView.jsx";
+import ModelsView from "./views/ModelsView.jsx";
 import RunView from "./views/RunView.jsx";
 
-/**
- * Main app component.
- * Keeps shared state, loads backend data, and renders each page.
- */
 function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState("");
   const [models, setModels] = useState([]);
+  const [modelFamilies, setModelFamilies] = useState([]);
+  const [trainingDatasets, setTrainingDatasets] = useState([]);
+  const [testDatasets, setTestDatasets] = useState([]);
   const [runs, setRuns] = useState([]);
   const [currentRun, setCurrentRun] = useState(null);
   const [pendingImagePaths, setPendingImagePaths] = useState([]);
-  const [selectedModelFileName, setSelectedModelFileName] = useState("");
+  const [selectedModelId, setSelectedModelId] = useState("");
   const [thresholdValue, setThresholdValue] = useState(DEFAULT_THRESHOLD);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState({ message: "", type: "info" });
@@ -36,10 +36,27 @@ function App() {
   const [route, setCurrentRoute] = useState(() => parseRoute(window.location.hash));
   const [bboxVisible, setBboxVisible] = useState(true);
   const [editingDetection, setEditingDetection] = useState(null);
+  const [trainingDatasetForm, setTrainingDatasetForm] = useState({
+    name: "",
+    images_dir: "",
+    labels_dir: "",
+    description: "",
+  });
+  const [testDatasetForm, setTestDatasetForm] = useState({
+    name: "",
+    images_dir: "",
+    labels_dir: "",
+    description: "",
+  });
+  const [modelRegistrationForm, setModelRegistrationForm] = useState({
+    source_model_path: "",
+    family_name: "",
+    training_dataset_id: "",
+    test_dataset_id: "",
+    notes: "",
+  });
 
   const toErrorMessage = useCallback((error) => String(error?.message ?? error), []);
-
-  // Navigate by updating the URL hash (for example, "#/history").
   const goToRoute = useCallback((targetRoute) => {
     const currentRoute = window.location.hash.replace(/^#/, "");
     if (currentRoute === targetRoute) {
@@ -49,7 +66,6 @@ function App() {
     window.location.hash = targetRoute;
   }, []);
 
-  // Small API helpers used by hooks and page actions.
   const apiGet = useCallback(async (apiPath) => window.desktopAPI.apiGet(apiPath), []);
   const apiPost = useCallback(async (apiPath, body) => window.desktopAPI.apiPost(apiPath, body), []);
   const apiPatch = useCallback(async (apiPath, body) => window.desktopAPI.apiPatch(apiPath, body), []);
@@ -74,15 +90,34 @@ function App() {
     showStatus(toErrorMessage(error), "error");
   }, [showStatus, toErrorMessage]);
 
-  // Load model options shown in the run settings model dropdown.
   const loadModels = useCallback(async () => {
-    const modelsResponse = await apiGet("/models");
-    const nextModels = Array.isArray(modelsResponse.models) ? modelsResponse.models : [];
+    const response = await apiGet("/models");
+    const nextModels = Array.isArray(response.models) ? response.models : [];
     setModels(nextModels);
     return nextModels;
   }, [apiGet]);
 
-  // Load run history used by the Prediction History page.
+  const loadModelRegistry = useCallback(async () => {
+    const response = await apiGet("/models/registry");
+    const nextFamilies = Array.isArray(response.families) ? response.families : [];
+    setModelFamilies(nextFamilies);
+    return nextFamilies;
+  }, [apiGet]);
+
+  const loadTrainingDatasets = useCallback(async () => {
+    const response = await apiGet("/datasets/training");
+    const nextDatasets = Array.isArray(response.datasets) ? response.datasets : [];
+    setTrainingDatasets(nextDatasets);
+    return nextDatasets;
+  }, [apiGet]);
+
+  const loadTestDatasets = useCallback(async () => {
+    const response = await apiGet("/datasets/test");
+    const nextDatasets = Array.isArray(response.datasets) ? response.datasets : [];
+    setTestDatasets(nextDatasets);
+    return nextDatasets;
+  }, [apiGet]);
+
   const loadRuns = useCallback(async () => {
     const runData = await apiGet("/runs");
     const nextRuns = Array.isArray(runData) ? runData : [];
@@ -90,21 +125,18 @@ function App() {
     return nextRuns;
   }, [apiGet]);
 
-  // Load one run by ID, then sync selected model + threshold controls.
   const loadRun = useCallback(async (runId) => {
     const runData = await apiGet(`/runs/${runId}`);
     setCurrentRun(runData);
     setThresholdValue(clampThreshold(runData.threshold_score));
-    if (runData.model_file_name) {
-      setSelectedModelFileName(runData.model_file_name);
+    if (runData.model_version_id) {
+      setSelectedModelId(String(runData.model_version_id));
     }
     return runData;
   }, [apiGet]);
 
-  // Wait for backend before loading models and runs.
   const waitForBackend = useCallback(async () => {
-    const maxAttempts = 25;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = 1; attempt <= 25; attempt += 1) {
       try {
         if (window.desktopAPI.isBackendReady) {
           const isReady = await window.desktopAPI.isBackendReady();
@@ -123,12 +155,11 @@ function App() {
     throw new Error("Backend did not become ready in time.");
   }, [apiGet]);
 
-  // Keep checking run-job status until it finishes.
   const pollRunJobUntilDone = useCallback(async (runJobId) => {
     while (true) {
       const runJobData = await apiGet(`/predict/run-jobs/${runJobId}`);
-      setLoading((previousLoading) => ({
-        ...previousLoading,
+      setLoading((previousValue) => ({
+        ...previousValue,
         processedImages: Number(runJobData.processed_images) || 0,
         totalImages: Number(runJobData.total_images) || 0,
       }));
@@ -143,7 +174,6 @@ function App() {
     }
   }, [apiGet]);
 
-  // Keep route state in sync with browser hash changes.
   useEffect(() => {
     const handleRouteChange = () => {
       setCurrentRoute(parseRoute(window.location.hash));
@@ -153,14 +183,10 @@ function App() {
       window.location.hash = "/";
     }
     handleRouteChange();
-
     window.addEventListener("hashchange", handleRouteChange);
-    return () => {
-      window.removeEventListener("hashchange", handleRouteChange);
-    };
+    return () => window.removeEventListener("hashchange", handleRouteChange);
   }, []);
 
-  // Boot sequence: connect backend, then load models + runs for first paint.
   useEffect(() => {
     let isMounted = true;
 
@@ -173,20 +199,19 @@ function App() {
 
         setApiBaseUrl(backendBaseUrl);
         await waitForBackend();
-
-        const [nextModels] = await Promise.all([loadModels(), loadRuns()]);
+        const [nextModels] = await Promise.all([
+          loadModels(),
+          loadModelRegistry(),
+          loadTrainingDatasets(),
+          loadTestDatasets(),
+          loadRuns(),
+        ]);
 
         if (isMounted && nextModels.length > 0) {
-          setSelectedModelFileName((previousSelection) => {
-            const hasPreviousSelection = nextModels.some((model) => model.model_file_name === previousSelection);
-            if (hasPreviousSelection) {
-              return previousSelection;
-            }
-            return nextModels[0].model_file_name;
+          setSelectedModelId((previousValue) => {
+            const hasPreviousSelection = nextModels.some((model) => String(model.id) === String(previousValue));
+            return hasPreviousSelection ? previousValue : String(nextModels[0].id);
           });
-        }
-
-        if (isMounted) {
           showStatus("Ready.", "info");
         }
       } catch (error) {
@@ -197,24 +222,21 @@ function App() {
     }
 
     initializeApp();
-
     return () => {
       isMounted = false;
     };
-  }, [loadModels, loadRuns, showStatus, waitForBackend]);
+  }, [loadModelRegistry, loadModels, loadRuns, loadTestDatasets, loadTrainingDatasets, showStatus, waitForBackend]);
 
-  // Ensure selected model always points to a currently available model option.
   useEffect(() => {
     if (models.length === 0) {
-      setSelectedModelFileName("");
+      setSelectedModelId("");
       return;
     }
-
-    const hasSelectedModel = models.some((model) => model.model_file_name === selectedModelFileName);
+    const hasSelectedModel = models.some((model) => String(model.id) === String(selectedModelId));
     if (!hasSelectedModel) {
-      setSelectedModelFileName(models[0].model_file_name);
+      setSelectedModelId(String(models[0].id));
     }
-  }, [models, selectedModelFileName]);
+  }, [models, selectedModelId]);
 
   const routedRunId = useMemo(() => {
     if (route.kind === "run" || route.kind === "image") {
@@ -223,7 +245,6 @@ function App() {
     return null;
   }, [route]);
 
-  // Load run data for the current route when needed.
   useEffect(() => {
     if (!routedRunId) {
       return;
@@ -231,21 +252,15 @@ function App() {
     if (currentRun && currentRun.id === routedRunId) {
       return;
     }
-
-    loadRun(routedRunId).catch((error) => {
-      showErrorStatus(error);
-    });
+    loadRun(routedRunId).catch(showErrorStatus);
   }, [currentRun, loadRun, routedRunId, showErrorStatus]);
 
-  // Active image detail object for the current route.
   const detailImage = useMemo(() => {
     if (route.kind !== "image" || !currentRun || currentRun.id !== route.runId) {
       return null;
     }
     return currentRun.images.find((image) => image.run_image_id === route.runImageId) || null;
   }, [currentRun, route]);
-
-  // Detection list for image-detail panel and overlay drawing.
   const detailDetections = useMemo(() => detailImage?.detections || [], [detailImage]);
 
   useEffect(() => {
@@ -265,17 +280,12 @@ function App() {
     }
   }, [apiPatch, loadRuns, showErrorStatus]);
 
-  // Route-derived visibility flags used by split view components.
   const isRunViewVisible = route.kind === "run";
   const isHistoryViewVisible = route.kind === "history";
   const isImageDetailViewVisible = route.kind === "image";
+  const isModelsViewVisible = route.kind === "models";
 
-  const {
-    detailImageRef,
-    detailCanvasRef,
-    drawBoundingBoxes,
-    onCanvasClick,
-  } = useDetectionCanvas({
+  const { detailImageRef, detailCanvasRef, drawBoundingBoxes, onCanvasClick } = useDetectionCanvas({
     isImageDetailVisible: isImageDetailViewVisible,
     currentRun,
     detailImage,
@@ -296,7 +306,6 @@ function App() {
         totalCount: 0,
       };
     }
-
     return {
       runMetaText: `Prediction History: ${formatRunDisplayName(currentRun)}`,
       currentRunTitle: `Run #${currentRun.id}`,
@@ -307,32 +316,24 @@ function App() {
     };
   }, [currentRun]);
 
-  // Friendly summary of current pending file selection.
   const selectedImagesText = useMemo(() => {
     if (pendingImagePaths.length === 0) {
       return "No new images selected.";
     }
-
-    const previewNames = pendingImagePaths
-      .slice(0, 3)
-      .map((filePath) => filePath.split(/[/\\]/).pop());
-
+    const previewNames = pendingImagePaths.slice(0, 3).map((filePath) => filePath.split(/[/\\]/).pop());
     const overflowCount = pendingImagePaths.length - previewNames.length;
-    const overflowText = overflowCount > 0 ? ` (+${overflowCount} more)` : "";
-    return `Selected ${pendingImagePaths.length}: ${previewNames.join(", ")}${overflowText}`;
+    return `Selected ${pendingImagePaths.length}: ${previewNames.join(", ")}${overflowCount > 0 ? ` (+${overflowCount} more)` : ""}`;
   }, [pendingImagePaths]);
 
-  // Current run images + pending images waiting to be submitted.
   const totalReadyImages = useMemo(() => {
     const currentRunImages = currentRun ? Number(currentRun.image_count) || 0 : 0;
     return currentRunImages + pendingImagePaths.length;
   }, [currentRun, pendingImagePaths.length]);
 
   const openRunImage = useCallback((runImageId) => {
-    if (!currentRun) {
-      return;
+    if (currentRun) {
+      goToRoute(`/run/${currentRun.id}/image/${runImageId}`);
     }
-    goToRoute(`/run/${currentRun.id}/image/${runImageId}`);
   }, [currentRun, goToRoute]);
 
   const backToRunOrHome = useCallback(() => {
@@ -356,17 +357,18 @@ function App() {
     apiPost,
     apiDelete,
     loadModels,
+    loadModelRegistry,
     loadRuns,
     pollRunJobUntilDone,
     showStatus,
     currentRun,
     pendingImagePaths,
-    selectedModelFileName,
+    selectedModelId,
     thresholdValue,
     setCurrentRun,
     setPendingImagePaths,
     setThresholdValue,
-    setSelectedModelFileName,
+    setSelectedModelId,
     setIsBusy,
     setLoading,
     setEditingDetection,
@@ -382,33 +384,96 @@ function App() {
     return Number(detection.confidence_score) >= thresholdValue;
   });
 
-  const onThresholdChange = useCallback((rawValue) => {
-    setThresholdValue(clampThreshold(rawValue));
+  const onUpdateDatasetForm = useCallback((formName, fieldName, value) => {
+    const setter = formName === "training" ? setTrainingDatasetForm : setTestDatasetForm;
+    setter((previousValue) => ({ ...previousValue, [fieldName]: value }));
   }, []);
 
-  const onCloseDetectionModal = useCallback(() => {
-    setEditingDetection(null);
+  const onCreateDataset = useCallback(async (datasetType) => {
+    const formValue = datasetType === "training" ? trainingDatasetForm : testDatasetForm;
+    const endpoint = datasetType === "training" ? "/datasets/training" : "/datasets/test";
+    try {
+      const response = await apiPost(endpoint, formValue);
+      if (datasetType === "training") {
+        setTrainingDatasetForm({ name: "", images_dir: "", labels_dir: "", description: "" });
+        await loadTrainingDatasets();
+      } else {
+        setTestDatasetForm({ name: "", images_dir: "", labels_dir: "", description: "" });
+        await loadTestDatasets();
+      }
+      showStatus(`Saved dataset "${response.dataset?.name || formValue.name}".`, "info");
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiPost, loadTestDatasets, loadTrainingDatasets, showErrorStatus, showStatus, testDatasetForm, trainingDatasetForm]);
+
+  const onUpdateModelForm = useCallback((fieldName, value) => {
+    setModelRegistrationForm((previousValue) => ({ ...previousValue, [fieldName]: value }));
   }, []);
 
-  const onSetDetectionClass = useCallback((className) => {
-    if (!editingDetection) {
-      return;
+  const onRegisterModel = useCallback(async () => {
+    try {
+      await apiPost("/models/register", {
+        ...modelRegistrationForm,
+        training_dataset_id: Number(modelRegistrationForm.training_dataset_id),
+        test_dataset_id: Number(modelRegistrationForm.test_dataset_id),
+      });
+      await Promise.all([loadModels(), loadModelRegistry()]);
+      setModelRegistrationForm({
+        source_model_path: "",
+        family_name: "",
+        training_dataset_id: "",
+        test_dataset_id: "",
+        notes: "",
+      });
+      showStatus("Registered and evaluated baseline model.", "info");
+    } catch (error) {
+      showErrorStatus(error);
     }
-    updateDetection(editingDetection.id, { class_name: className });
-  }, [editingDetection, updateDetection]);
+  }, [apiPost, loadModelRegistry, loadModels, modelRegistrationForm, showErrorStatus, showStatus]);
 
-  const onDeleteDetection = useCallback(() => {
-    if (!editingDetection) {
+  const onDeleteModelVersion = useCallback(async (modelVersionId) => {
+    try {
+      await apiDelete(`/models/versions/${modelVersionId}`);
+      const nextModels = await loadModels();
+      await loadModelRegistry();
+      setSelectedModelId((previousValue) => {
+        if (String(previousValue) !== String(modelVersionId)) {
+          return previousValue;
+        }
+        return nextModels.length > 0 ? String(nextModels[0].id) : "";
+      });
+      showStatus("Model version deleted.", "info");
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiDelete, loadModelRegistry, loadModels, showErrorStatus, showStatus]);
+
+  const onFinalizeReviewedRun = useCallback(async () => {
+    if (!currentRun) {
+      showStatus("Open or create a run first.", "error");
       return;
     }
-    updateDetection(editingDetection.id, { is_deleted: true });
-  }, [editingDetection, updateDetection]);
+
+    try {
+      const response = await apiPost(`/runs/${currentRun.id}/finalize-review`, {});
+      setCurrentRun(response.run);
+      await loadModelRegistry();
+      showStatus(
+        `Finalized reviewed labels: ${response.replay_buffer_summary?.image_count || 0} images and ${response.replay_buffer_summary?.detection_count || 0} boxes saved to the replay buffer.`,
+        "info"
+      );
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiPost, currentRun, loadModelRegistry, showErrorStatus, showStatus]);
 
   return (
     <div className="shell">
       <TopBar
         onGoHome={() => goToRoute("/")}
         onGoHistory={() => goToRoute("/history")}
+        onGoModels={() => goToRoute("/models")}
         onAddModel={onAddModel}
         onStartNewRun={onStartNewRun}
       />
@@ -421,16 +486,18 @@ function App() {
         runSummary={runSummary}
         totalReadyImages={totalReadyImages}
         models={models}
-        selectedModelFileName={selectedModelFileName}
-        onModelChange={setSelectedModelFileName}
+        selectedModelId={selectedModelId}
+        onModelChange={setSelectedModelId}
         thresholdValue={thresholdValue}
-        onThresholdChange={onThresholdChange}
+        onThresholdChange={(rawValue) => setThresholdValue(clampThreshold(rawValue))}
         onPickImages={onPickImages}
         onRunInference={onRunInference}
         onRecalculate={onRecalculate}
+        onFinalizeReviewedRun={onFinalizeReviewedRun}
         isBusy={isBusy}
         selectedImagesText={selectedImagesText}
         currentRunImages={currentRunImages}
+        replayBufferSummary={currentRun?.replay_buffer_summary || null}
         onDeleteAllImages={onRemoveAllImagesFromRun}
         onOpenImage={openRunImage}
         onRemoveImage={onRemoveImageFromRun}
@@ -442,6 +509,21 @@ function App() {
         runs={runs}
         runImageUrl={runImageUrl}
         onOpenRun={(runId) => goToRoute(`/run/${runId}`)}
+      />
+
+      <ModelsView
+        visible={isModelsViewVisible}
+        trainingDatasets={trainingDatasets}
+        testDatasets={testDatasets}
+        modelFamilies={modelFamilies}
+        modelForm={modelRegistrationForm}
+        datasetForms={{ training: trainingDatasetForm, test: testDatasetForm }}
+        onUpdateDatasetForm={onUpdateDatasetForm}
+        onCreateTrainingDataset={() => onCreateDataset("training")}
+        onCreateTestDataset={() => onCreateDataset("test")}
+        onUpdateModelForm={onUpdateModelForm}
+        onRegisterModel={onRegisterModel}
+        onDeleteModelVersion={onDeleteModelVersion}
       />
 
       <ImageDetailView
@@ -467,10 +549,10 @@ function App() {
 
       <DetectionModal
         detection={editingDetection}
-        onClose={onCloseDetectionModal}
-        onSetLive={() => onSetDetectionClass("live")}
-        onSetDead={() => onSetDetectionClass("dead")}
-        onDelete={onDeleteDetection}
+        onClose={() => setEditingDetection(null)}
+        onSetLive={() => editingDetection && updateDetection(editingDetection.id, { class_name: "live" })}
+        onSetDead={() => editingDetection && updateDetection(editingDetection.id, { class_name: "dead" })}
+        onDelete={() => editingDetection && updateDetection(editingDetection.id, { is_deleted: true })}
       />
     </div>
   );

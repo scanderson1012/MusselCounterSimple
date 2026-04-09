@@ -3,14 +3,19 @@
 import sqlite3
 
 
-def create_run(database_connection: sqlite3.Connection, model_file_name: str, threshold_score: float) -> int:
+def create_run(
+    database_connection: sqlite3.Connection,
+    model_file_name: str,
+    threshold_score: float,
+    model_version_id: int | None = None,
+) -> int:
     """Insert a new run row and return its numeric ID."""
     cursor = database_connection.execute(
         """
-        INSERT INTO runs (model_file_name, threshold_score)
-        VALUES (?, ?)
+        INSERT INTO runs (model_file_name, model_version_id, threshold_score)
+        VALUES (?, ?, ?)
         """,
-        (model_file_name, threshold_score),
+        (model_file_name, model_version_id, threshold_score),
     )
     return int(cursor.lastrowid)
 
@@ -103,17 +108,35 @@ def get_model_name_from_run_id(database_connection: sqlite3.Connection, run_id: 
     return model_file_name_from_database["model_file_name"]
 
 
+def get_model_version_id_from_run_id(database_connection: sqlite3.Connection, run_id: int) -> int | None:
+    """Return the run's current model version ID, or `None` if missing/unset."""
+    row = database_connection.execute(
+        """
+        SELECT model_version_id
+        FROM runs
+        WHERE id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    if row is None or row["model_version_id"] is None:
+        return None
+    return int(row["model_version_id"])
+
+
 def update_this_runs_model(
-    database_connection: sqlite3.Connection, run_id: int, model_file_name: str
+    database_connection: sqlite3.Connection,
+    run_id: int,
+    model_file_name: str,
+    model_version_id: int | None = None,
 ) -> None:
     """Set `model_file_name` for one run and touch `updated_at`."""
     database_connection.execute(
         """
         UPDATE runs
-        SET model_file_name = ?, updated_at = CURRENT_TIMESTAMP
+        SET model_file_name = ?, model_version_id = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (model_file_name, run_id),
+        (model_file_name, model_version_id, run_id),
     )
 
 

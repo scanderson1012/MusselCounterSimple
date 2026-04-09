@@ -37,6 +37,7 @@ def get_run_from_database(database_connection: sqlite3.Connection, run_id: int) 
             created_at,
             updated_at,
             model_file_name,
+            model_version_id,
             threshold_score,
             image_count,
             live_mussel_count,
@@ -107,6 +108,21 @@ def get_run_from_database(database_connection: sqlite3.Connection, run_id: int) 
 
     run_data["images"] = images
     run_data["preview_image_url"] = images[0]["image_url"] if images else None
+    replay_buffer_summary = database_connection.execute(
+        """
+        SELECT
+            id,
+            image_count,
+            detection_count,
+            finalized_at
+        FROM replay_buffer_runs
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    run_data["replay_buffer_summary"] = (
+        dict(replay_buffer_summary) if replay_buffer_summary is not None else None
+    )
     return run_data
 
 
@@ -119,6 +135,7 @@ def list_runs_from_database(database_connection: sqlite3.Connection) -> list[dic
             runs.created_at,
             runs.updated_at,
             runs.model_file_name,
+            runs.model_version_id,
             runs.threshold_score,
             runs.image_count,
             runs.live_mussel_count,

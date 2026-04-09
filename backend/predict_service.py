@@ -13,7 +13,9 @@ import sqlite3
 from backend.database import create_run
 from backend.database import get_database_connection
 from backend.database import get_image_file_metadata_from_database
+from backend.database import get_model_file_name_for_run
 from backend.database import get_model_name_from_run_id
+from backend.database import get_model_version_id_from_run_id
 from backend.database import get_run_from_database
 from backend.database import link_image_to_run
 from backend.database import list_run_image_ids
@@ -48,6 +50,7 @@ class PredictServiceInput:
     run_id: int | None
     image_ids: list[int]
     image_paths: list[str]
+    model_version_id: int | None
     model_file_name: str
     threshold_score: float
 
@@ -107,10 +110,16 @@ def _resolve_run_id_for_predict_request(
     request: PredictServiceInput,
     creating_new_run: bool,
     requested_model: str,
+    requested_model_version_id: int | None,
 ) -> int:
     """Resolve run target for this `/predict` call."""
     if creating_new_run:
-        return create_run(database_connection, requested_model, request.threshold_score)
+        return create_run(
+            database_connection,
+            requested_model,
+            request.threshold_score,
+            model_version_id=requested_model_version_id,
+        )
 
     run_id = request.run_id
     if run_id is None or not run_exists(database_connection, run_id):
@@ -179,6 +188,7 @@ def _select_images_to_process(
     creating_new_run: bool,
     current_model: str | None,
     requested_model: str,
+    requested_model_version_id: int | None,
     new_images_for_this_run: list[int],
 ) -> tuple[list[int], bool]:
     """Choose model_execution scope for this request."""
@@ -187,7 +197,12 @@ def _select_images_to_process(
 
     using_new_model = _is_new_model(current_model, requested_model)
     if using_new_model:
-        update_this_runs_model(database_connection, run_id, requested_model)
+        update_this_runs_model(
+            database_connection,
+            run_id,
+            requested_model,
+            model_version_id=requested_model_version_id,
+        )
         images_to_process = list_run_image_ids(database_connection, run_id)
     else:
         images_to_process = new_images_for_this_run
@@ -246,7 +261,8 @@ def _complete_and_return_run_job_if_no_images_to_process(
 def execute_predict_request(request: PredictServiceInput) -> dict[str, Any]:
     """Execute the full `/predict` workflow and return run-job response."""
     creating_new_run = request.run_id is None
-    requested_model = request.model_file_name
+    requested_model = ""
+    requested_model_version_id = request.model_version_id
 
     _stop_if_another_model_is_currently_executing()
     if creating_new_run:
@@ -255,16 +271,28 @@ def execute_predict_request(request: PredictServiceInput) -> dict[str, Any]:
     run_data: dict[str, Any] | None = None
 
     with get_database_connection() as database_connection:
+        try:
+            requested_model = get_model_file_name_for_run(
+                database_connection=database_connection,
+                model_version_id=requested_model_version_id,
+                model_file_name=request.model_file_name,
+            )
+        except ValueError as error:
+            raise PredictServiceError(400, str(error)) from error
+
         run_id = _resolve_run_id_for_predict_request(
             database_connection=database_connection,
             request=request,
             creating_new_run=creating_new_run,
             requested_model=requested_model,
+            requested_model_version_id=requested_model_version_id,
         )
         if creating_new_run:
             current_model = requested_model
         else:
             current_model = get_model_name_from_run_id(database_connection, run_id)
+            if requested_model_version_id is None:
+                requested_model_version_id = get_model_version_id_from_run_id(database_connection, run_id)
 
         update_run_threshold(database_connection, run_id, request.threshold_score)
 
@@ -286,6 +314,7 @@ def execute_predict_request(request: PredictServiceInput) -> dict[str, Any]:
             creating_new_run=creating_new_run,
             current_model=current_model,
             requested_model=requested_model,
+            requested_model_version_id=requested_model_version_id,
             new_images_for_this_run=new_images_for_this_run,
         )
 

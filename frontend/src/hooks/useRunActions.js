@@ -9,17 +9,18 @@ function useRunActions({
   apiPost,
   apiDelete,
   loadModels,
+  loadModelRegistry,
   loadRuns,
   pollRunJobUntilDone,
   showStatus,
   currentRun,
   pendingImagePaths,
-  selectedModelFileName,
+  selectedModelId,
   thresholdValue,
   setCurrentRun,
   setPendingImagePaths,
   setThresholdValue,
-  setSelectedModelFileName,
+  setSelectedModelId,
   setIsBusy,
   setLoading,
   setEditingDetection,
@@ -48,13 +49,14 @@ function useRunActions({
       }
 
       const nextModels = await loadModels();
+      await loadModelRegistry();
       if (nextModels.length > 0) {
-        setSelectedModelFileName(nextModels[0].model_file_name);
+        setSelectedModelId(String(nextModels[0].id));
       }
     } catch (error) {
       showStatus(String(error.message ?? error), "error");
     }
-  }, [loadModels, setSelectedModelFileName, showStatus]);
+  }, [loadModelRegistry, loadModels, setSelectedModelId, showStatus]);
 
   // Open native file picker for images and merge with pending set.
   const onPickImages = useCallback(async () => {
@@ -68,8 +70,8 @@ function useRunActions({
 
   // Start a model run and wait if backend returns a run-job ID.
   const onRunInference = useCallback(async () => {
-    if (!selectedModelFileName) {
-      showStatus("No model file selected. Put a model in app_data/models first.", "error");
+    if (!selectedModelId) {
+      showStatus("No model selected. Register a baseline model first.", "error");
       return;
     }
 
@@ -87,7 +89,7 @@ function useRunActions({
         run_id: currentRun ? currentRun.id : null,
         image_ids: [],
         image_paths: pendingImagePaths,
-        model_file_name: selectedModelFileName,
+        model_version_id: Number(selectedModelId),
         threshold_score: thresholdValue,
       });
 
@@ -138,7 +140,7 @@ function useRunActions({
     loadRuns,
     pendingImagePaths,
     pollRunJobUntilDone,
-    selectedModelFileName,
+    selectedModelId,
     setCurrentRun,
     goToRoute,
     setIsBusy,

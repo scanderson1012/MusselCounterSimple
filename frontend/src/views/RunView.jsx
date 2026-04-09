@@ -8,16 +8,18 @@ function RunView({
   runSummary,
   totalReadyImages,
   models,
-  selectedModelFileName,
+  selectedModelId,
   onModelChange,
   thresholdValue,
   onThresholdChange,
   onPickImages,
   onRunInference,
   onRecalculate,
+  onFinalizeReviewedRun,
   isBusy,
   selectedImagesText,
   currentRunImages,
+  replayBufferSummary,
   onDeleteAllImages,
   onOpenImage,
   onRemoveImage,
@@ -75,12 +77,12 @@ function RunView({
           <h3>Run Settings</h3>
           <div className="field">
             <label htmlFor="model-select">Model</label>
-            <select id="model-select" value={selectedModelFileName} onChange={(event) => onModelChange(event.target.value)}>
+            <select id="model-select" value={selectedModelId} onChange={(event) => onModelChange(event.target.value)}>
               {models.length === 0 ? (
-                <option value="">No models in app_data/models</option>
+                <option value="">No registered models</option>
               ) : (
                 models.map((model) => (
-                  <option key={model.model_file_name} value={model.model_file_name}>
+                  <option key={model.id} value={model.id}>
                     {model.file_name}
                   </option>
                 ))
@@ -122,11 +124,22 @@ function RunView({
             <button id="recalculate-btn" className="ghost" onClick={onRecalculate} disabled={isBusy}>
               Recalculate
             </button>
+            <button id="finalize-reviewed-run-btn" className="ghost" onClick={onFinalizeReviewedRun} disabled={isBusy || currentRunImages.length === 0}>
+              Finalize Reviewed Labels
+            </button>
           </div>
 
           <p id="selected-images-text" className="helper">
             {selectedImagesText}
           </p>
+          <p className="helper">
+            Finalize reviewed labels: saves the current run's non-deleted boxes and classes into the replay buffer for future fine-tuning.
+          </p>
+          {replayBufferSummary ? (
+            <p className="helper">
+              Replay buffer snapshot: {replayBufferSummary.image_count} images, {replayBufferSummary.detection_count} boxes saved.
+            </p>
+          ) : null}
         </div>
       </div>
 

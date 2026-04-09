@@ -11,6 +11,7 @@ This module is the backend API surface used by the Electron frontend. It coordin
 from pathlib import Path
 from typing import Any
 from typing import Literal
+import sqlite3
 
 from fastapi import APIRouter
 from fastapi import File
@@ -22,12 +23,21 @@ from pydantic import ConfigDict
 from pydantic import Field
 
 from backend.database import get_database_connection
+from backend.database import create_dataset_record
+from backend.database import delete_model_version
+from backend.database import finalize_run_into_replay_buffer
 from backend.database import get_image_file_metadata_from_database
+from backend.database import get_model_version_by_id
 from backend.database import get_run_info_from_detection_id
 from backend.database import get_run_from_database
+from backend.database import list_model_options
+from backend.database import list_model_registry
 from backend.database import list_runs_from_database
+from backend.database import list_test_datasets
+from backend.database import list_training_datasets
 from backend.database import recalculate_run_image_mussel_counts_from_detections
 from backend.database import recalculate_run_mussel_counts_from_detections
+from backend.database import register_baseline_model
 from backend.database import run_exists
 from backend.database import unlink_image_from_run
 from backend.database import update_detection_fields
@@ -38,7 +48,8 @@ from backend.run_jobs import get_run_job
 from backend.predict_service import PredictServiceError
 from backend.predict_service import PredictServiceInput
 from backend.predict_service import execute_predict_request
-from backend.model_store import list_models_from_disk
+from backend.model_evaluation import evaluate_model_file
+from backend.model_evaluation import store_model_evaluation
 
 router = APIRouter()
 
@@ -49,7 +60,8 @@ class PredictRequest(BaseModel):
     run_id: int | None = None
     image_ids: list[int] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
-    model_file_name: str
+    model_version_id: int | None = None
+    model_file_name: str = ""
     threshold_score: float = 0.5
 
 
@@ -68,6 +80,34 @@ class DetectionPatchRequest(BaseModel):
     is_deleted: bool | None = None
 
 
+class DatasetCreateRequest(BaseModel):
+    """Request body for registering one training/test dataset directory pair."""
+
+    name: str
+    images_dir: str
+    labels_dir: str
+    description: str | None = None
+
+
+class ModelRegisterRequest(BaseModel):
+    """Register a baseline model and immediately evaluate it on a test set."""
+
+    source_model_path: str
+    family_name: str | None = None
+    training_dataset_id: int
+    test_dataset_id: int
+    architecture: str = "fasterrcnn_resnet50_fpn_v2"
+    num_classes: int = 3
+    notes: str | None = None
+
+
+class ModelEvaluateRequest(BaseModel):
+    """Run one stored model version against a selected test dataset."""
+
+    test_dataset_id: int
+    score_threshold: float = 0.5
+
+
 @router.post("/predict")
 def create_or_update_run_and_do_model_execution(
     request: PredictRequest,
@@ -79,6 +119,7 @@ def create_or_update_run_and_do_model_execution(
                 run_id=request.run_id,
                 image_ids=list(request.image_ids),
                 image_paths=list(request.image_paths),
+                model_version_id=request.model_version_id,
                 model_file_name=request.model_file_name,
                 threshold_score=request.threshold_score,
             )
@@ -182,6 +223,30 @@ def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
     return {"run": run_data}
 
 
+@router.post("/runs/{run_id}/finalize-review")
+def finalize_reviewed_run(run_id: int) -> dict[str, Any]:
+    """Finalize the current reviewed run into the replay buffer for future fine-tuning."""
+    with get_database_connection() as database_connection:
+        if not run_exists(database_connection, run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        try:
+            replay_buffer_summary = finalize_run_into_replay_buffer(database_connection, run_id)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        database_connection.commit()
+        run_data = get_run_from_database(database_connection, run_id)
+
+    if run_data is None:
+        raise HTTPException(status_code=500, detail="Failed to load run")
+
+    return {
+        "run": run_data,
+        "replay_buffer_summary": replay_buffer_summary,
+    }
+
+
 @router.get("/runs")
 def list_runs() -> list[dict[str, Any]]:
     """Return all runs for the history view, newest first."""
@@ -201,8 +266,170 @@ def get_run(run_id: int) -> dict[str, Any]:
 
 @router.get("/models")
 def list_models() -> dict[str, Any]:
-    """Return model files discovered in the on-disk models directory."""
-    return list_models_from_disk()
+    """Return model versions available for the run selector."""
+    with get_database_connection() as database_connection:
+        return list_model_options(database_connection)
+
+
+@router.get("/models/registry")
+def list_models_registry() -> dict[str, Any]:
+    """Return model families, versions, and their latest evaluation."""
+    with get_database_connection() as database_connection:
+        return {"families": list_model_registry(database_connection)}
+
+
+@router.get("/datasets/training")
+def get_training_datasets() -> dict[str, Any]:
+    """Return registered training datasets."""
+    with get_database_connection() as database_connection:
+        return {"datasets": list_training_datasets(database_connection)}
+
+
+@router.post("/datasets/training")
+def create_training_dataset(request: DatasetCreateRequest) -> dict[str, Any]:
+    """Register one training dataset by folder path pointers."""
+    try:
+        with get_database_connection() as database_connection:
+            dataset = create_dataset_record(
+                database_connection,
+                "training_datasets",
+                name=request.name,
+                images_dir=request.images_dir,
+                labels_dir=request.labels_dir,
+                description=request.description,
+            )
+            database_connection.commit()
+        return {"dataset": dataset}
+    except (FileNotFoundError, ValueError, sqlite3.IntegrityError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/datasets/test")
+def get_test_datasets() -> dict[str, Any]:
+    """Return registered test datasets."""
+    with get_database_connection() as database_connection:
+        return {"datasets": list_test_datasets(database_connection)}
+
+
+@router.post("/datasets/test")
+def create_test_dataset(request: DatasetCreateRequest) -> dict[str, Any]:
+    """Register one test dataset by folder path pointers."""
+    try:
+        with get_database_connection() as database_connection:
+            dataset = create_dataset_record(
+                database_connection,
+                "test_datasets",
+                name=request.name,
+                images_dir=request.images_dir,
+                labels_dir=request.labels_dir,
+                description=request.description,
+            )
+            database_connection.commit()
+        return {"dataset": dataset}
+    except (FileNotFoundError, ValueError, sqlite3.IntegrityError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/models/register")
+def register_model(request: ModelRegisterRequest) -> dict[str, Any]:
+    """Register a baseline model as v1, then evaluate it on the chosen test set."""
+    try:
+        with get_database_connection() as database_connection:
+            version = register_baseline_model(
+                database_connection=database_connection,
+                source_model_path=request.source_model_path,
+                family_name=request.family_name,
+                training_dataset_id=request.training_dataset_id,
+                test_dataset_id=request.test_dataset_id,
+                architecture=request.architecture,
+                num_classes=request.num_classes,
+                notes=request.notes,
+            )
+
+            test_dataset = next(
+                (
+                    dataset
+                    for dataset in list_test_datasets(database_connection)
+                    if int(dataset["id"]) == int(request.test_dataset_id)
+                ),
+                None,
+            )
+            if test_dataset is None:
+                raise ValueError(f"Test dataset not found: {request.test_dataset_id}")
+
+            evaluation_result = evaluate_model_file(
+                model_file_name=str(version["model_file_name"]),
+                images_dir=str(test_dataset["images_dir"]),
+                labels_dir=str(test_dataset["labels_dir"]),
+                class_mapping=dict(version["class_mapping"]),
+            )
+            evaluation = store_model_evaluation(
+                database_connection=database_connection,
+                model_version_id=int(version["id"]),
+                test_dataset_id=int(request.test_dataset_id),
+                evaluation_result=evaluation_result,
+            )
+            database_connection.commit()
+
+            refreshed_version = get_model_version_by_id(database_connection, int(version["id"]))
+        return {"model_version": refreshed_version, "evaluation": evaluation}
+    except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/models/versions/{model_version_id}/evaluate")
+def evaluate_registered_model(model_version_id: int, request: ModelEvaluateRequest) -> dict[str, Any]:
+    """Re-run evaluation for one stored model version on a selected test dataset."""
+    try:
+        with get_database_connection() as database_connection:
+            model_version = get_model_version_by_id(database_connection, model_version_id)
+            if model_version is None:
+                raise HTTPException(status_code=404, detail="Model version not found")
+
+            test_dataset = next(
+                (
+                    dataset
+                    for dataset in list_test_datasets(database_connection)
+                    if int(dataset["id"]) == int(request.test_dataset_id)
+                ),
+                None,
+            )
+            if test_dataset is None:
+                raise HTTPException(status_code=404, detail="Test dataset not found")
+
+            evaluation_result = evaluate_model_file(
+                model_file_name=str(model_version["model_file_name"]),
+                images_dir=str(test_dataset["images_dir"]),
+                labels_dir=str(test_dataset["labels_dir"]),
+                class_mapping=dict(model_version["class_mapping"]),
+                score_threshold=float(request.score_threshold),
+            )
+            evaluation = store_model_evaluation(
+                database_connection=database_connection,
+                model_version_id=model_version_id,
+                test_dataset_id=int(request.test_dataset_id),
+                evaluation_result=evaluation_result,
+                score_threshold=float(request.score_threshold),
+            )
+            database_connection.commit()
+
+            refreshed_version = get_model_version_by_id(database_connection, model_version_id)
+        return {"model_version": refreshed_version, "evaluation": evaluation}
+    except HTTPException:
+        raise
+    except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.delete("/models/versions/{model_version_id}")
+def remove_model_version(model_version_id: int) -> dict[str, Any]:
+    """Delete one stored model version from the registry and disk."""
+    with get_database_connection() as database_connection:
+        deleted = delete_model_version(database_connection, model_version_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Model version not found")
+        database_connection.commit()
+        return {"families": list_model_registry(database_connection)}
 
 
 @router.post("/images/upload")
