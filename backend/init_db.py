@@ -68,6 +68,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "model_version_id" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN model_version_id INTEGER")
 
+    replay_buffer_image_columns = set()
+    if _table_exists(conn, "replay_buffer_images"):
+        replay_buffer_image_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(replay_buffer_images)").fetchall()
+        }
+    if replay_buffer_image_columns and "model_version_id" not in replay_buffer_image_columns:
+        conn.execute("ALTER TABLE replay_buffer_images ADD COLUMN model_version_id INTEGER")
+
     # Backfill legacy disk models into the registry so existing installs still work.
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)

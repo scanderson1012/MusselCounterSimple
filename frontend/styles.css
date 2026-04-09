@@ -704,6 +704,10 @@ input[type="range"] {
   cursor: crosshair;
 }
 
+.detail-draw-helper {
+  margin-top: 10px;
+}
+
 .detail-sidebar {
   display: flex;
   flex-direction: column;

@@ -4,6 +4,7 @@ from backend.db.connection import get_database_connection
 from backend.db.detections import get_run_info_from_detection_id
 from backend.db.detections import recalculate_run_mussel_counts_from_detections
 from backend.db.detections import recalculate_run_image_mussel_counts_from_detections
+from backend.db.detections import create_detection_for_run_image
 from backend.db.detections import update_detection_fields
 from backend.db.reads import get_image_file_metadata_from_database
 from backend.db.reads import get_run_from_database
@@ -30,11 +31,13 @@ from backend.model_registry import register_baseline_model
 from backend.replay_buffer import finalize_run_into_replay_buffer
 from backend.replay_buffer import get_replay_buffer_summary_for_run
 from backend.replay_buffer import list_replay_buffer_counts_by_model
+from backend.replay_buffer import remove_replay_buffer_entry_for_run_image
 
 __all__ = [
     "create_run",
     "create_dataset_record",
     "delete_model_version",
+    "create_detection_for_run_image",
     "finalize_run_into_replay_buffer",
     "get_database_connection",
     "get_image_file_metadata_from_database",
@@ -49,6 +52,7 @@ __all__ = [
     "list_model_options",
     "list_model_registry",
     "list_replay_buffer_counts_by_model",
+    "remove_replay_buffer_entry_for_run_image",
     "list_run_image_ids",
     "list_runs_from_database",
     "list_test_datasets",

@@ -156,6 +156,7 @@ def list_runs_from_database(database_connection: sqlite3.Connection) -> list[dic
                 LIMIT 1
             ) AS preview_image_path
         FROM runs
+        WHERE runs.image_count > 0
         ORDER BY runs.created_at DESC, runs.id DESC
         """
     ).fetchall()

@@ -40,7 +40,9 @@ function DetectionModal({ detection, onClose, onSetLive, onSetDead, onDelete }) 
           <div className="modal-field">
             <span className="modal-field-label">Confidence</span>
             <span id="modal-confidence" className="modal-field-value">
-              {(Number(detection.confidence_score) * 100).toFixed(1)}% {detection.class_name}
+              {Number.isFinite(Number(detection.confidence_score))
+                ? `${(Number(detection.confidence_score) * 100).toFixed(1)}% ${detection.class_name}`
+                : `Manual ${detection.class_name}`}
             </span>
           </div>
 

@@ -88,7 +88,9 @@ export function formatModelFileNameForDisplay(modelFileName) {
  */
 export function getVisibleDetections(detections, threshold) {
   return detections.filter((detection) => {
-    return !detection.is_deleted && Number(detection.confidence_score) >= threshold;
+    return !detection.is_deleted && (
+      detection.confidence_score == null || Number(detection.confidence_score) >= threshold
+    );
   });
 }
 

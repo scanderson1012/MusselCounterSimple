@@ -137,7 +137,7 @@ function RunView({
           </p>
           {replayBufferSummary ? (
             <p className="helper">
-              Replay buffer snapshot: {replayBufferSummary.image_count} images, {replayBufferSummary.detection_count} boxes saved.
+              Replay buffer snapshot: {replayBufferSummary.image_count} images, {replayBufferSummary.detection_count} mussels saved.
             </p>
           ) : null}
         </div>

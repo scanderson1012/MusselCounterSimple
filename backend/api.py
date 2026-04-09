@@ -24,6 +24,7 @@ from pydantic import Field
 
 from backend.database import get_database_connection
 from backend.database import create_dataset_record
+from backend.database import create_detection_for_run_image
 from backend.database import delete_model_version
 from backend.database import finalize_run_into_replay_buffer
 from backend.database import get_image_file_metadata_from_database
@@ -37,6 +38,7 @@ from backend.database import list_test_datasets
 from backend.database import list_training_datasets
 from backend.database import recalculate_run_image_mussel_counts_from_detections
 from backend.database import recalculate_run_mussel_counts_from_detections
+from backend.database import remove_replay_buffer_entry_for_run_image
 from backend.database import register_baseline_model
 from backend.database import run_exists
 from backend.database import unlink_image_from_run
@@ -78,6 +80,17 @@ class DetectionPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     class_name: Literal["live", "dead"] | None = None
     is_deleted: bool | None = None
+
+
+class DetectionCreateRequest(BaseModel):
+    """Create one new detection box on a run image."""
+
+    class_name: Literal["live", "dead"]
+    bbox_x1: float
+    bbox_y1: float
+    bbox_x2: float
+    bbox_y2: float
+    confidence_score: float | None = None
 
 
 class DatasetCreateRequest(BaseModel):
@@ -209,6 +222,7 @@ def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
         if not run_exists(database_connection, run_id):
             raise HTTPException(status_code=404, detail="Run not found")
 
+        remove_replay_buffer_entry_for_run_image(database_connection, run_image_id)
         deleted = unlink_image_from_run(database_connection, run_id, run_image_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Image not found in run")
@@ -220,6 +234,53 @@ def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
     if run_data is None:
         raise HTTPException(status_code=500, detail="Failed to load run")
 
+    return {"run": run_data}
+
+
+@router.post("/run-images/{run_image_id}/detections")
+def create_detection_for_image(run_image_id: int, request: DetectionCreateRequest) -> dict[str, Any]:
+    """Create one new detection on a run image and refresh counts."""
+    with get_database_connection() as database_connection:
+        run_information = database_connection.execute(
+            """
+            SELECT
+                run_images.id AS run_image_id,
+                run_images.run_id,
+                runs.threshold_score
+            FROM run_images
+            JOIN runs ON runs.id = run_images.run_id
+            WHERE run_images.id = ?
+            """,
+            (run_image_id,),
+        ).fetchone()
+        if run_information is None:
+            raise HTTPException(status_code=404, detail="Run image not found")
+
+        try:
+            create_detection_for_run_image(
+                database_connection=database_connection,
+                run_image_id=run_image_id,
+                class_name=request.class_name,
+                bbox_x1=request.bbox_x1,
+                bbox_y1=request.bbox_y1,
+                bbox_x2=request.bbox_x2,
+                bbox_y2=request.bbox_y2,
+                confidence_score=request.confidence_score,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        recalculate_run_image_mussel_counts_from_detections(
+            database_connection,
+            run_image_id=run_image_id,
+            threshold_score=float(run_information["threshold_score"]),
+        )
+        update_run_mussel_count(database_connection, int(run_information["run_id"]))
+        database_connection.commit()
+        run_data = get_run_from_database(database_connection, int(run_information["run_id"]))
+
+    if run_data is None:
+        raise HTTPException(status_code=500, detail="Failed to load run")
     return {"run": run_data}
 
 

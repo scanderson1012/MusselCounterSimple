@@ -239,7 +239,7 @@ function ModelsView({
                       </p>
                       <p className="muted">Stored path: {version.model_file_name}</p>
                       <p className="muted">
-                        Replay buffer: {Number(version.replay_buffer_counts?.image_count || 0)} images | {Number(version.replay_buffer_counts?.detection_count || 0)} boxes
+                        Replay buffer: {Number(version.replay_buffer_counts?.image_count || 0)} images | {Number(version.replay_buffer_counts?.detection_count || 0)} mussels
                       </p>
                     </div>
 

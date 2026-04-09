@@ -187,11 +187,12 @@ function useRunActions({
       const response = await apiDelete(`/runs/${currentRun.id}/images/${runImageId}`);
       setCurrentRun(response.run);
       await loadRuns();
+      await loadModelRegistry();
       showStatus("Image removed from run.", "info");
     } catch (error) {
       showStatus(String(error.message ?? error), "error");
     }
-  }, [apiDelete, currentRun, loadRuns, setCurrentRun, showStatus]);
+  }, [apiDelete, currentRun, loadModelRegistry, loadRuns, setCurrentRun, showStatus]);
 
   // Remove every image from the current run in sequence.
   const onRemoveAllImagesFromRun = useCallback(async () => {
@@ -209,11 +210,12 @@ function useRunActions({
       const refreshedRun = await apiGet(`/runs/${currentRun.id}`);
       setCurrentRun(refreshedRun);
       await loadRuns();
+      await loadModelRegistry();
       showStatus(`Removed ${runImageIds.length} images from run.`, "info");
     } catch (error) {
       showStatus(String(error.message ?? error), "error");
     }
-  }, [apiDelete, apiGet, currentRun, loadRuns, setCurrentRun, showStatus]);
+  }, [apiDelete, apiGet, currentRun, loadModelRegistry, loadRuns, setCurrentRun, showStatus]);
 
   return {
     onStartNewRun,

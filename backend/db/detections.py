@@ -45,13 +45,17 @@ def recalculate_run_image_mussel_counts_from_detections(
         SELECT
             SUM(
                 CASE
-                    WHEN class_name = 'live' AND is_deleted = 0 AND COALESCE(confidence_score, 0) >= ?
+                    WHEN class_name = 'live' AND is_deleted = 0 AND (
+                        confidence_score IS NULL OR COALESCE(confidence_score, 0) >= ?
+                    )
                     THEN 1 ELSE 0
                 END
             ) AS live_mussel_count,
             SUM(
                 CASE
-                    WHEN class_name = 'dead' AND is_deleted = 0 AND COALESCE(confidence_score, 0) >= ?
+                    WHEN class_name = 'dead' AND is_deleted = 0 AND (
+                        confidence_score IS NULL OR COALESCE(confidence_score, 0) >= ?
+                    )
                     THEN 1 ELSE 0
                 END
             ) AS dead_mussel_count
@@ -128,3 +132,49 @@ def update_detection_fields(
         """,
         values,
     )
+
+
+def create_detection_for_run_image(
+    database_connection: sqlite3.Connection,
+    run_image_id: int,
+    class_name: str,
+    bbox_x1: float,
+    bbox_y1: float,
+    bbox_x2: float,
+    bbox_y2: float,
+    confidence_score: float | None = None,
+    is_edited: int = 1,
+) -> int:
+    """Insert one new detection row for a run image and return its ID."""
+    if class_name not in {"live", "dead"}:
+        raise ValueError(f"Unsupported class_name: {class_name}")
+    if bbox_x2 <= bbox_x1 or bbox_y2 <= bbox_y1:
+        raise ValueError("Bounding box must have positive width and height")
+
+    cursor = database_connection.execute(
+        """
+        INSERT INTO detections (
+            run_image_id,
+            class_name,
+            confidence_score,
+            bbox_x1,
+            bbox_y1,
+            bbox_x2,
+            bbox_y2,
+            is_edited,
+            is_deleted
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """,
+        (
+            run_image_id,
+            class_name,
+            confidence_score,
+            bbox_x1,
+            bbox_y1,
+            bbox_x2,
+            bbox_y2,
+            is_edited,
+        ),
+    )
+    return int(cursor.lastrowid)

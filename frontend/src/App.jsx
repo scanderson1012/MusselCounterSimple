@@ -36,6 +36,8 @@ function App() {
   const [route, setCurrentRoute] = useState(() => parseRoute(window.location.hash));
   const [bboxVisible, setBboxVisible] = useState(true);
   const [editingDetection, setEditingDetection] = useState(null);
+  const [isDrawingBox, setIsDrawingBox] = useState(false);
+  const [draftDetection, setDraftDetection] = useState(null);
   const [trainingDatasetForm, setTrainingDatasetForm] = useState({
     name: "",
     images_dir: "",
@@ -269,6 +271,11 @@ function App() {
     }
   }, [currentRun, detailImage, route, showStatus]);
 
+  useEffect(() => {
+    setDraftDetection(null);
+    setIsDrawingBox(false);
+  }, [route.kind, detailImage?.run_image_id]);
+
   const updateDetection = useCallback(async (detectionId, fields) => {
     try {
       const response = await apiPatch(`/detections/${detectionId}`, fields);
@@ -280,12 +287,34 @@ function App() {
     }
   }, [apiPatch, loadRuns, showErrorStatus]);
 
+  const createDetection = useCallback(async (runImageId, payload) => {
+    try {
+      const response = await apiPost(`/run-images/${runImageId}/detections`, payload);
+      setCurrentRun(response.run);
+      setDraftDetection(null);
+      setIsDrawingBox(false);
+      await loadRuns();
+      showStatus("New detection box saved.", "info");
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiPost, loadRuns, showErrorStatus, showStatus]);
+
   const isRunViewVisible = route.kind === "run";
   const isHistoryViewVisible = route.kind === "history";
   const isImageDetailViewVisible = route.kind === "image";
   const isModelsViewVisible = route.kind === "models";
 
-  const { detailImageRef, detailCanvasRef, drawBoundingBoxes, onCanvasClick } = useDetectionCanvas({
+  const {
+    detailImageRef,
+    detailCanvasRef,
+    drawBoundingBoxes,
+    onCanvasClick,
+    onCanvasMouseDown,
+    onCanvasMouseMove,
+    onCanvasMouseUp,
+  } = useDetectionCanvas({
+    isDrawingBox,
     isImageDetailVisible: isImageDetailViewVisible,
     currentRun,
     detailImage,
@@ -293,6 +322,8 @@ function App() {
     thresholdValue,
     bboxVisible,
     onDetectionHit: setEditingDetection,
+    draftDetection,
+    onDraftDetectionChange: setDraftDetection,
   });
 
   const runSummary = useMemo(() => {
@@ -381,7 +412,7 @@ function App() {
     if (detection.is_deleted) {
       return true;
     }
-    return Number(detection.confidence_score) >= thresholdValue;
+    return detection.confidence_score == null || Number(detection.confidence_score) >= thresholdValue;
   });
 
   const onUpdateDatasetForm = useCallback((formName, fieldName, value) => {
@@ -460,13 +491,45 @@ function App() {
       setCurrentRun(response.run);
       await loadModelRegistry();
       showStatus(
-        `Finalized reviewed labels: ${response.replay_buffer_summary?.image_count || 0} images and ${response.replay_buffer_summary?.detection_count || 0} boxes saved to the replay buffer.`,
+        `Finalized reviewed labels: ${response.replay_buffer_summary?.image_count || 0} images and ${response.replay_buffer_summary?.detection_count || 0} mussels saved to the replay buffer.`,
         "info"
       );
     } catch (error) {
       showErrorStatus(error);
     }
   }, [apiPost, currentRun, loadModelRegistry, showErrorStatus, showStatus]);
+
+  const onStartDrawingBox = useCallback(() => {
+    setEditingDetection(null);
+    setDraftDetection(null);
+    setIsDrawingBox(true);
+    showStatus("Drag on the image to create a new box, then move or resize it before saving.", "info");
+  }, [showStatus]);
+
+  const onCancelDraftDetection = useCallback(() => {
+    setDraftDetection(null);
+    setIsDrawingBox(false);
+  }, []);
+
+  const onSaveDraftDetection = useCallback((className) => {
+    if (!detailImage || !draftDetection) {
+      return;
+    }
+    const width = Number(draftDetection.x2) - Number(draftDetection.x1);
+    const height = Number(draftDetection.y2) - Number(draftDetection.y1);
+    if (width < 2 || height < 2) {
+      showStatus("Draw a larger box before saving it.", "error");
+      return;
+    }
+    createDetection(detailImage.run_image_id, {
+      class_name: className,
+      bbox_x1: draftDetection.x1,
+      bbox_y1: draftDetection.y1,
+      bbox_x2: draftDetection.x2,
+      bbox_y2: draftDetection.y2,
+      confidence_score: null,
+    });
+  }, [createDetection, detailImage, draftDetection, showStatus]);
 
   return (
     <div className="shell">
@@ -537,10 +600,19 @@ function App() {
         runImageUrl={runImageUrl}
         onImageLoad={drawBoundingBoxes}
         onCanvasClick={onCanvasClick}
+        onCanvasMouseDown={onCanvasMouseDown}
+        onCanvasMouseMove={onCanvasMouseMove}
+        onCanvasMouseUp={onCanvasMouseUp}
         detailCounts={detailCounts}
         detectionsForList={detectionsForList}
         onOpenDetection={setEditingDetection}
         onBack={backToRunOrHome}
+        isDrawingBox={isDrawingBox}
+        draftDetection={draftDetection}
+        onStartDrawingBox={onStartDrawingBox}
+        onCancelDraftDetection={onCancelDraftDetection}
+        onSaveDraftLive={() => onSaveDraftDetection("live")}
+        onSaveDraftDead={() => onSaveDraftDetection("dead")}
       />
 
       <footer className="app-credit">
