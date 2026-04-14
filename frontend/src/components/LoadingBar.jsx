@@ -17,7 +17,7 @@ function LoadingBar({ loading }) {
           <div id="inference-loading-bar" className="inference-loading-bar" style={{ width: "0%" }} />
         </div>
         <p id="inference-loading-text" className="inference-loading-text">
-          Running model... 0 / 0 images
+          Working... 0 / 0
         </p>
       </div>
     );
@@ -27,6 +27,9 @@ function LoadingBar({ loading }) {
   const boundedTotal = Math.max(0, Number(loading.totalImages) || 0);
   const percentage =
     boundedTotal > 0 ? Math.round((Math.min(boundedProcessed, boundedTotal) / boundedTotal) * 100) : 0;
+  const etaText = Number.isFinite(Number(loading.estimatedRemainingSeconds))
+    ? ` | ETA ${Math.max(0, Number(loading.estimatedRemainingSeconds))}s`
+    : "";
 
   return (
     <div id="inference-loading" className="inference-loading" aria-live="polite">
@@ -42,8 +45,15 @@ function LoadingBar({ loading }) {
         <div id="inference-loading-bar" className="inference-loading-bar" style={{ width: `${percentage}%` }} />
       </div>
       <p id="inference-loading-text" className="inference-loading-text">
-        Running model... {boundedProcessed} / {boundedTotal} images
+        {loading.message || "Working..."} {boundedProcessed} / {boundedTotal}{etaText}
       </p>
+      {loading.canCancel ? (
+        <div className="loading-actions">
+          <button className="ghost loading-cancel-btn" onClick={loading.onCancel}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

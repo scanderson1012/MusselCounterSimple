@@ -17,6 +17,7 @@ import torchvision.transforms as transforms
 from backend.model_execution import _get_model_device
 
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+EVAL_IMAGE_SIZE = 640
 
 
 class PascalVOCDataset(Dataset):
@@ -43,13 +44,26 @@ class PascalVOCDataset(Dataset):
         image_path, label_path = self.samples[index]
         image = Image.open(image_path).convert("RGB")
         boxes, labels = parse_pascal_voc_xml(label_path, self.class_name_to_id)
+        resized_image, resized_boxes = _resize_image_and_boxes(
+            image=image,
+            boxes=boxes,
+            target_size=EVAL_IMAGE_SIZE,
+        )
+        boxes_tensor = torch.as_tensor(resized_boxes, dtype=torch.float32)
+        labels_tensor = torch.as_tensor(labels, dtype=torch.int64)
+        area_tensor = (
+            (boxes_tensor[:, 2] - boxes_tensor[:, 0]) *
+            (boxes_tensor[:, 3] - boxes_tensor[:, 1])
+        ) if len(boxes_tensor) > 0 else torch.zeros((0,), dtype=torch.float32)
 
         target = {
-            "boxes": torch.as_tensor(boxes, dtype=torch.float32),
-            "labels": torch.as_tensor(labels, dtype=torch.int64),
+            "boxes": boxes_tensor,
+            "labels": labels_tensor,
             "image_id": torch.tensor([index], dtype=torch.int64),
+            "area": area_tensor,
+            "iscrowd": torch.zeros((len(labels_tensor),), dtype=torch.int64),
         }
-        return self.transform(image), target
+        return self.transform(resized_image), target
 
 
 def evaluate_model_file(
@@ -58,6 +72,9 @@ def evaluate_model_file(
     labels_dir: str,
     class_mapping: dict[str, str],
     score_threshold: float = 0.5,
+    progress_callback=None,
+    stage_callback=None,
+    should_cancel_callback=None,
 ) -> dict[str, Any]:
     """Run mAP + per-class metrics on one registered model file."""
     class_id_to_name = {int(key): str(value) for key, value in class_mapping.items()}
@@ -66,20 +83,38 @@ def evaluate_model_file(
     if len(dataset) == 0:
         raise ValueError("No Pascal VOC image/XML pairs were found in the selected test dataset")
 
+    if stage_callback is not None:
+        stage_callback("Loading model and preparing evaluation")
+
     loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=_collate_fn)
     model, device = _get_model_device(model_file_name)
-    mean_average_precision = MeanAveragePrecision(
-        box_format="xyxy",
-        iou_type="bbox",
-        class_metrics=True,
-    ).to(device)
+    try:
+        mean_average_precision = MeanAveragePrecision(
+            box_format="xyxy",
+            iou_type="bbox",
+            class_metrics=True,
+            backend="faster_coco_eval",
+        ).to(device)
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "Model evaluation requires the `faster-coco-eval` package. "
+            "Install project requirements again, then restart the app."
+        ) from error
 
     classwise_totals = {
         class_id: {"tp": 0, "fp": 0, "fn": 0}
         for class_id in class_id_to_name.keys()
     }
 
-    for images, targets in loader:
+    total_batches = len(loader)
+    if progress_callback is not None:
+        progress_callback(0, total_batches)
+    if stage_callback is not None:
+        stage_callback("Evaluating test dataset")
+
+    for batch_index, (images, targets) in enumerate(loader, start=1):
+        if should_cancel_callback is not None and should_cancel_callback():
+            raise RuntimeError("Evaluation cancelled by user.")
         device_images = [image.to(device) for image in images]
         with torch.no_grad():
             outputs = model(device_images)
@@ -109,7 +144,11 @@ def evaluate_model_file(
             )
 
         mean_average_precision.update(predictions_for_metric, targets_for_metric)
+        if progress_callback is not None:
+            progress_callback(batch_index, total_batches)
 
+    if stage_callback is not None:
+        stage_callback("Summarizing evaluation metrics")
     raw_results = mean_average_precision.compute()
     overall_metrics = _serialize_map_results(raw_results)
     per_class_rows = _serialize_per_class_rows(raw_results, class_id_to_name, classwise_totals)
@@ -141,6 +180,33 @@ def parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) -> 
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(class_name_to_id[class_name])
     return boxes, labels
+
+
+def _resize_image_and_boxes(
+    image: Image.Image,
+    boxes: list[list[float]],
+    target_size: int,
+) -> tuple[Image.Image, list[list[float]]]:
+    """Mirror the training notebook's eval resize to a fixed square image size."""
+    original_width, original_height = image.size
+    resized_image = image.resize((target_size, target_size), Image.Resampling.BILINEAR)
+
+    if original_width <= 0 or original_height <= 0 or not boxes:
+        return resized_image, boxes
+
+    scale_x = target_size / float(original_width)
+    scale_y = target_size / float(original_height)
+    resized_boxes: list[list[float]] = []
+    for xmin, ymin, xmax, ymax in boxes:
+        resized_boxes.append(
+            [
+                xmin * scale_x,
+                ymin * scale_y,
+                xmax * scale_x,
+                ymax * scale_y,
+            ]
+        )
+    return resized_image, resized_boxes
 
 
 def store_model_evaluation(
@@ -306,13 +372,19 @@ def _to_class_metric_lookup(class_ids_tensor, values_tensor) -> dict[int, float]
 
 
 def _build_summary_text(overall_metrics: dict[str, Any], per_class_rows: list[dict[str, Any]]) -> str:
+    per_class_lookup = {
+        str(row.get("class_name") or "").strip().lower(): row
+        for row in per_class_rows
+    }
+    dead_row = per_class_lookup.get("dead", {})
+    live_row = per_class_lookup.get("live", {})
     summary_lines = [
         f"mAP={overall_metrics.get('map', 0):.4f}",
         f"mAP@50={overall_metrics.get('map_50', 0):.4f}",
         f"mAP@75={overall_metrics.get('map_75', 0):.4f}",
+        f"Dead Precision={dead_row.get('precision', 0):.4f}",
+        f"Dead Recall={dead_row.get('recall', 0):.4f}",
+        f"Alive Precision={live_row.get('precision', 0):.4f}",
+        f"Alive Recall={live_row.get('recall', 0):.4f}",
     ]
-    for row in per_class_rows:
-        summary_lines.append(
-            f"{row['class_name']}: mAP={row['map']:.4f} | Precision={row['precision']:.4f} | Recall={row['recall']:.4f} | F1={row['f1']:.4f}"
-        )
     return " | ".join(summary_lines)

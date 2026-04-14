@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 from typing import Any
 
+from backend.init_db import BASELINE_MODEL_FAMILY_NAME
 from backend.init_db import MODELS_DIRECTORY
 from backend.replay_buffer import list_replay_buffer_counts_by_model
 
@@ -132,6 +133,50 @@ def create_dataset_record(
     return dict(row) if row is not None else {"id": dataset_id}
 
 
+def get_or_create_dataset_record(
+    database_connection: sqlite3.Connection,
+    table_name: str,
+    name: str,
+    images_dir: str,
+    labels_dir: str,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Return an existing dataset with matching paths or create a new one."""
+    if table_name not in {"training_datasets", "test_datasets"}:
+        raise ValueError(f"Unsupported dataset table: {table_name}")
+
+    validated_images_dir = _validate_dataset_directory(images_dir, "images_dir")
+    validated_labels_dir = _validate_dataset_directory(labels_dir, "labels_dir")
+    row = database_connection.execute(
+        f"""
+        SELECT
+            id,
+            name,
+            images_dir,
+            labels_dir,
+            description,
+            created_at
+        FROM {table_name}
+        WHERE images_dir = ? AND labels_dir = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (validated_images_dir, validated_labels_dir),
+    ).fetchone()
+    if row is not None:
+        return dict(row)
+
+    resolved_name = _make_unique_dataset_name(database_connection, table_name, name)
+    return create_dataset_record(
+        database_connection=database_connection,
+        table_name=table_name,
+        name=resolved_name,
+        images_dir=validated_images_dir,
+        labels_dir=validated_labels_dir,
+        description=description,
+    )
+
+
 def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[str, Any]]:
     """Return nested model families with versions and latest stored evaluation."""
     sync_registry_with_disk(database_connection)
@@ -166,11 +211,18 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
                 model_versions.class_mapping_json,
                 model_versions.training_dataset_id,
                 model_versions.test_dataset_id,
+                model_versions.description,
                 model_versions.notes,
                 model_versions.created_at,
                 model_versions.updated_at,
                 training_datasets.name AS training_dataset_name,
-                test_datasets.name AS test_dataset_name
+                training_datasets.images_dir AS training_images_dir,
+                training_datasets.labels_dir AS training_labels_dir,
+                training_datasets.description AS training_dataset_description,
+                test_datasets.name AS test_dataset_name,
+                test_datasets.images_dir AS test_images_dir,
+                test_datasets.labels_dir AS test_labels_dir,
+                test_datasets.description AS test_dataset_description
             FROM model_versions
             LEFT JOIN training_datasets ON training_datasets.id = model_versions.training_dataset_id
             LEFT JOIN test_datasets ON test_datasets.id = model_versions.test_dataset_id
@@ -233,6 +285,7 @@ def register_baseline_model(
     architecture: str = "fasterrcnn_resnet50_fpn_v2",
     num_classes: int = 3,
     class_mapping: dict[str, Any] | None = None,
+    description: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
     """Register a baseline model as version v1 in managed storage."""
@@ -275,9 +328,10 @@ def register_baseline_model(
             class_mapping_json,
             training_dataset_id,
             test_dataset_id,
+            description,
             notes
         )
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             family_id,
@@ -291,6 +345,7 @@ def register_baseline_model(
             json.dumps(class_mapping or DEFAULT_CLASS_MAPPING),
             training_dataset_id,
             test_dataset_id,
+            _normalize_text(description),
             _normalize_text(notes),
         ),
     )
@@ -407,46 +462,121 @@ def delete_model_version(
     database_connection: sqlite3.Connection,
     model_version_id: int,
 ) -> bool:
-    """Soft-delete one model version and remove its stored file when possible."""
+    """Permanently delete one version and all later versions in its family."""
     row = database_connection.execute(
         """
         SELECT
             model_versions.id,
             model_versions.family_id,
+            model_families.name AS family_name,
+            model_versions.version_number,
             model_versions.model_file_name,
             model_versions.is_deleted
         FROM model_versions
+        JOIN model_families ON model_families.id = model_versions.family_id
         WHERE model_versions.id = ?
         """,
         (model_version_id,),
     ).fetchone()
     if row is None:
         return False
-    if int(row["is_deleted"] or 0) == 1:
-        return True
+    if _is_protected_baseline_family(str(row["family_name"])):
+        raise ValueError("The bundled baseline model cannot be deleted.")
+
+    rows_to_delete = database_connection.execute(
+        """
+        SELECT
+            id,
+            family_id,
+            model_file_name
+        FROM model_versions
+        WHERE family_id = ? AND version_number >= ?
+        ORDER BY version_number DESC
+        """,
+        (int(row["family_id"]), int(row["version_number"])),
+    ).fetchall()
+    for version_row in rows_to_delete:
+        model_path = Path(str(version_row["model_file_name"])).expanduser().resolve()
+        if model_path.is_file():
+            model_path.unlink(missing_ok=True)
+        _delete_empty_parent_directories(model_path)
 
     database_connection.execute(
         """
-        UPDATE model_versions
-        SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        DELETE FROM model_versions
+        WHERE family_id = ? AND version_number >= ?
         """,
-        (model_version_id,),
+        (int(row["family_id"]), int(row["version_number"])),
     )
-    database_connection.execute(
+    remaining_versions = database_connection.execute(
         """
-        UPDATE model_families
-        SET updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SELECT id
+        FROM model_versions
+        WHERE family_id = ?
+        LIMIT 1
         """,
         (int(row["family_id"]),),
+    ).fetchone()
+    if remaining_versions is None:
+        database_connection.execute(
+            """
+            DELETE FROM model_families
+            WHERE id = ?
+            """,
+            (int(row["family_id"]),),
+        )
+    else:
+        database_connection.execute(
+            """
+            UPDATE model_families
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (int(row["family_id"]),),
+        )
+    return True
+
+
+def delete_model_family(
+    database_connection: sqlite3.Connection,
+    family_id: int,
+) -> bool:
+    """Permanently delete every version in one family."""
+    family_row = database_connection.execute(
+        """
+        SELECT id, name
+        FROM model_families
+        WHERE id = ?
+        """,
+        (family_id,),
+    ).fetchone()
+    if family_row is None:
+        return False
+    if _is_protected_baseline_family(str(family_row["name"])):
+        raise ValueError("The bundled baseline model cannot be deleted.")
+
+    rows = database_connection.execute(
+        """
+        SELECT
+            id
+        FROM model_versions
+        WHERE family_id = ?
+        ORDER BY version_number DESC
+        """,
+        (family_id,),
+    ).fetchall()
+    if not rows:
+        return True
+
+    for row in rows:
+        delete_model_version(database_connection, int(row["id"]))
+    database_connection.execute(
+        """
+        DELETE FROM model_families
+        WHERE id = ?
+        """,
+        (family_id,),
     )
-
-    model_path = Path(str(row["model_file_name"])).expanduser().resolve()
-    if model_path.is_file():
-        model_path.unlink(missing_ok=True)
-
-    _delete_empty_parent_directories(model_path)
     return True
 
 
@@ -539,6 +669,29 @@ def _normalize_text(value: str | None) -> str | None:
     return normalized or None
 
 
+def _make_unique_dataset_name(
+    database_connection: sqlite3.Connection,
+    table_name: str,
+    preferred_name: str,
+) -> str:
+    base_name = preferred_name.strip() or "dataset"
+    candidate_name = base_name
+    suffix = 2
+    while True:
+        existing = database_connection.execute(
+            f"""
+            SELECT id
+            FROM {table_name}
+            WHERE name = ?
+            """,
+            (candidate_name,),
+        ).fetchone()
+        if existing is None:
+            return candidate_name
+        candidate_name = f"{base_name}_{suffix}"
+        suffix += 1
+
+
 def _delete_empty_parent_directories(model_path: Path) -> None:
     """Best-effort cleanup for empty version/family folders under models storage."""
     try:
@@ -553,3 +706,7 @@ def _delete_empty_parent_directories(model_path: Path) -> None:
         except OSError:
             break
         current = current.parent
+
+
+def _is_protected_baseline_family(family_name: str) -> bool:
+    return family_name.strip().lower() == BASELINE_MODEL_FAMILY_NAME.strip().lower()

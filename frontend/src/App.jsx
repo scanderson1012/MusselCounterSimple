@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_THRESHOLD,
   RUN_JOB_POLL_INTERVAL_MS,
@@ -20,6 +20,7 @@ import ModelsView from "./views/ModelsView.jsx";
 import RunView from "./views/RunView.jsx";
 
 function App() {
+  const statusTimeoutRef = useRef(null);
   const [apiBaseUrl, setApiBaseUrl] = useState("");
   const [models, setModels] = useState([]);
   const [modelFamilies, setModelFamilies] = useState([]);
@@ -32,29 +33,32 @@ function App() {
   const [thresholdValue, setThresholdValue] = useState(DEFAULT_THRESHOLD);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState({ message: "", type: "info" });
-  const [loading, setLoading] = useState({ visible: false, processedImages: 0, totalImages: 0 });
+  const [loading, setLoading] = useState({
+    visible: false,
+    processedImages: 0,
+    totalImages: 0,
+    message: "",
+    estimatedRemainingSeconds: null,
+    canCancel: false,
+    onCancel: null,
+  });
   const [route, setCurrentRoute] = useState(() => parseRoute(window.location.hash));
   const [bboxVisible, setBboxVisible] = useState(true);
   const [editingDetection, setEditingDetection] = useState(null);
   const [isDrawingBox, setIsDrawingBox] = useState(false);
   const [draftDetection, setDraftDetection] = useState(null);
-  const [trainingDatasetForm, setTrainingDatasetForm] = useState({
-    name: "",
-    images_dir: "",
-    labels_dir: "",
-    description: "",
-  });
-  const [testDatasetForm, setTestDatasetForm] = useState({
-    name: "",
-    images_dir: "",
-    labels_dir: "",
-    description: "",
-  });
+  const [isAddModelModalOpen, setIsAddModelModalOpen] = useState(false);
+  const [isSubmittingModel, setIsSubmittingModel] = useState(false);
+  const [modelReport, setModelReport] = useState(null);
   const [modelRegistrationForm, setModelRegistrationForm] = useState({
     source_model_path: "",
+    selected_model_file_name: "",
     family_name: "",
-    training_dataset_id: "",
-    test_dataset_id: "",
+    description: "",
+    training_images_dir: "",
+    training_labels_dir: "",
+    test_images_dir: "",
+    test_labels_dir: "",
     notes: "",
   });
 
@@ -81,11 +85,25 @@ function App() {
   }, [apiBaseUrl]);
 
   const showStatus = useCallback((message, type = "info") => {
+    if (statusTimeoutRef.current) {
+      window.clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
     if (!message) {
       setStatus({ message: "", type: "info" });
       return;
     }
     setStatus({ message: String(message), type });
+    statusTimeoutRef.current = window.setTimeout(() => {
+      setStatus({ message: "", type: "info" });
+      statusTimeoutRef.current = null;
+    }, 5000);
+  }, []);
+
+  useEffect(() => () => {
+    if (statusTimeoutRef.current) {
+      window.clearTimeout(statusTimeoutRef.current);
+    }
   }, []);
 
   const showErrorStatus = useCallback((error) => {
@@ -171,6 +189,31 @@ function App() {
       }
       if (runJobData.status === "failed") {
         throw new Error(runJobData.error_message || "Run job failed.");
+      }
+      await waitMilliseconds(RUN_JOB_POLL_INTERVAL_MS);
+    }
+  }, [apiGet]);
+
+  const pollModelJobUntilDone = useCallback(async (modelJobId) => {
+    while (true) {
+      const modelJobData = await apiGet(`/models/jobs/${modelJobId}`);
+      setLoading((previousValue) => ({
+        ...previousValue,
+        processedImages: Number(modelJobData.processed_images) || 0,
+        totalImages: Number(modelJobData.total_images) || 0,
+        message: modelJobData.stage || "Evaluating model...",
+        estimatedRemainingSeconds: modelJobData.estimated_remaining_seconds,
+        canCancel: modelJobData.status === "running",
+      }));
+
+      if (modelJobData.status === "completed") {
+        return modelJobData;
+      }
+      if (modelJobData.status === "cancelled") {
+        return modelJobData;
+      }
+      if (modelJobData.status === "failed") {
+        throw new Error(modelJobData.error_message || "Model evaluation failed.");
       }
       await waitMilliseconds(RUN_JOB_POLL_INTERVAL_MS);
     }
@@ -305,6 +348,18 @@ function App() {
   const isImageDetailViewVisible = route.kind === "image";
   const isModelsViewVisible = route.kind === "models";
 
+  const openAddModelModal = useCallback(() => {
+    setIsAddModelModalOpen(true);
+    goToRoute("/models");
+  }, [goToRoute]);
+
+  const closeAddModelModal = useCallback(() => {
+    if (isSubmittingModel) {
+      return;
+    }
+    setIsAddModelModalOpen(false);
+  }, [isSubmittingModel]);
+
   const {
     detailImageRef,
     detailCanvasRef,
@@ -404,6 +459,7 @@ function App() {
     setLoading,
     setEditingDetection,
     goToRoute,
+    onOpenAddModelModal: openAddModelModal,
   });
 
   const currentRunImages = currentRun ? currentRun.images : [];
@@ -415,61 +471,166 @@ function App() {
     return detection.confidence_score == null || Number(detection.confidence_score) >= thresholdValue;
   });
 
-  const onUpdateDatasetForm = useCallback((formName, fieldName, value) => {
-    const setter = formName === "training" ? setTrainingDatasetForm : setTestDatasetForm;
-    setter((previousValue) => ({ ...previousValue, [fieldName]: value }));
-  }, []);
-
-  const onCreateDataset = useCallback(async (datasetType) => {
-    const formValue = datasetType === "training" ? trainingDatasetForm : testDatasetForm;
-    const endpoint = datasetType === "training" ? "/datasets/training" : "/datasets/test";
-    try {
-      const response = await apiPost(endpoint, formValue);
-      if (datasetType === "training") {
-        setTrainingDatasetForm({ name: "", images_dir: "", labels_dir: "", description: "" });
-        await loadTrainingDatasets();
-      } else {
-        setTestDatasetForm({ name: "", images_dir: "", labels_dir: "", description: "" });
-        await loadTestDatasets();
-      }
-      showStatus(`Saved dataset "${response.dataset?.name || formValue.name}".`, "info");
-    } catch (error) {
-      showErrorStatus(error);
-    }
-  }, [apiPost, loadTestDatasets, loadTrainingDatasets, showErrorStatus, showStatus, testDatasetForm, trainingDatasetForm]);
-
   const onUpdateModelForm = useCallback((fieldName, value) => {
     setModelRegistrationForm((previousValue) => ({ ...previousValue, [fieldName]: value }));
   }, []);
 
-  const onRegisterModel = useCallback(async () => {
+  const onChooseModelFile = useCallback(async () => {
     try {
-      await apiPost("/models/register", {
-        ...modelRegistrationForm,
-        training_dataset_id: Number(modelRegistrationForm.training_dataset_id),
-        test_dataset_id: Number(modelRegistrationForm.test_dataset_id),
-      });
-      await Promise.all([loadModels(), loadModelRegistry()]);
-      setModelRegistrationForm({
-        source_model_path: "",
-        family_name: "",
-        training_dataset_id: "",
-        test_dataset_id: "",
-        notes: "",
-      });
-      showStatus("Registered and evaluated baseline model.", "info");
+      const result = await window.desktopAPI.pickModelFile();
+      if (!result) {
+        return;
+      }
+      const defaultName = String(result.fileName || "").replace(/\.[^.]+$/, "");
+      setModelRegistrationForm((previousValue) => ({
+        ...previousValue,
+        source_model_path: result.filePath || "",
+        selected_model_file_name: result.fileName || "",
+        family_name: previousValue.family_name ? previousValue.family_name : defaultName,
+      }));
     } catch (error) {
       showErrorStatus(error);
     }
-  }, [apiPost, loadModelRegistry, loadModels, modelRegistrationForm, showErrorStatus, showStatus]);
+  }, [showErrorStatus]);
 
-  const onDeleteModelVersion = useCallback(async (modelVersionId) => {
+  const onRegisterModel = useCallback(async () => {
     try {
-      await apiDelete(`/models/versions/${modelVersionId}`);
+      if (!modelRegistrationForm.source_model_path) {
+        throw new Error("Choose a .pth or .pt model file before continuing.");
+      }
+      if (!modelRegistrationForm.family_name.trim()) {
+        throw new Error("Enter a model name.");
+      }
+      if (!modelRegistrationForm.description.trim()) {
+        throw new Error("Enter a model description.");
+      }
+      if (!modelRegistrationForm.training_images_dir.trim() || !modelRegistrationForm.training_labels_dir.trim()) {
+        throw new Error("Enter both training dataset paths.");
+      }
+      if (!modelRegistrationForm.test_images_dir.trim() || !modelRegistrationForm.test_labels_dir.trim()) {
+        throw new Error("Enter both test dataset paths.");
+      }
+      setIsSubmittingModel(true);
+      const response = await apiPost("/models/register", modelRegistrationForm);
+      const nextModels = await loadModels();
+      await Promise.all([loadModelRegistry(), loadTrainingDatasets(), loadTestDatasets()]);
+      if (response.model_version?.id) {
+        setSelectedModelId(String(response.model_version.id));
+      } else if (nextModels.length > 0) {
+        setSelectedModelId(String(nextModels[0].id));
+      }
+      setModelRegistrationForm({
+        source_model_path: "",
+        selected_model_file_name: "",
+        family_name: "",
+        description: "",
+        training_images_dir: "",
+        training_labels_dir: "",
+        test_images_dir: "",
+        test_labels_dir: "",
+        notes: "",
+      });
+      setIsAddModelModalOpen(false);
+      showStatus("Model registered. Use Evaluate on Test Set when you are ready.", "info");
+    } catch (error) {
+      showErrorStatus(error);
+    } finally {
+      setIsSubmittingModel(false);
+    }
+  }, [
+    apiPost,
+    loadModelRegistry,
+    loadModels,
+    loadTestDatasets,
+    loadTrainingDatasets,
+    modelRegistrationForm,
+    showErrorStatus,
+    showStatus,
+  ]);
+
+  const onEvaluateModelVersion = useCallback(async (version) => {
+    try {
+      setLoading({
+        visible: true,
+        processedImages: 0,
+        totalImages: 0,
+        message: `Preparing evaluation for ${version.family_name} ${version.version_tag}...`,
+        estimatedRemainingSeconds: null,
+        canCancel: false,
+        onCancel: null,
+      });
+      const response = await apiPost(`/models/versions/${version.id}/evaluate-default`, {});
+      if (response.already_evaluated) {
+        setLoading({
+          visible: false,
+          processedImages: 0,
+          totalImages: 0,
+          message: "",
+          estimatedRemainingSeconds: null,
+          canCancel: false,
+          onCancel: null,
+        });
+        showStatus(response.message || "Evaluation already occurred for this model version.", "info");
+        return;
+      }
+
+      setLoading((previousValue) => ({
+        ...previousValue,
+        canCancel: true,
+        onCancel: async () => {
+          try {
+            await apiPost(`/models/jobs/${response.model_job_id}/cancel`, {});
+            showStatus("Cancellation requested for test evaluation.", "info");
+          } catch (error) {
+            showErrorStatus(error);
+          }
+        },
+      }));
+
+      await pollModelJobUntilDone(response.model_job_id);
+      await Promise.all([loadModels(), loadModelRegistry()]);
+      const latestJob = await apiGet(`/models/jobs/${response.model_job_id}`);
+      if (latestJob.status === "cancelled") {
+        showStatus(`Evaluation cancelled for ${version.family_name} ${version.version_tag}.`, "info");
+        return;
+      }
+      showStatus(`Evaluation complete for ${version.family_name} ${version.version_tag}.`, "info");
+    } catch (error) {
+      showErrorStatus(error);
+    } finally {
+      setLoading({
+        visible: false,
+        processedImages: 0,
+        totalImages: 0,
+        message: "",
+        estimatedRemainingSeconds: null,
+        canCancel: false,
+        onCancel: null,
+      });
+    }
+  }, [apiPost, loadModelRegistry, loadModels, pollModelJobUntilDone, showErrorStatus, showStatus]);
+
+  const onDeleteModelVersion = useCallback(async (version) => {
+    const versionNumber = Number(version.version_number || 0);
+    const isBaselineFamily = String(version.family_name || "").toLowerCase() === "fasterrcnn_baseline";
+    if (isBaselineFamily) {
+      showStatus("The bundled baseline model cannot be deleted.", "error");
+      return;
+    }
+    const confirmed = window.confirm(
+      versionNumber <= 1
+        ? `Permanently delete the model family "${version.family_name || "this model"}" and all of its versions? This cannot be undone.`
+        : `Permanently delete ${version.family_name || "this model"} ${version.version_tag || ""} and all later versions? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiDelete(`/models/versions/${version.id}`);
       const nextModels = await loadModels();
       await loadModelRegistry();
       setSelectedModelId((previousValue) => {
-        if (String(previousValue) !== String(modelVersionId)) {
+        if (String(previousValue) !== String(version.id)) {
           return previousValue;
         }
         return nextModels.length > 0 ? String(nextModels[0].id) : "";
@@ -479,6 +640,56 @@ function App() {
       showErrorStatus(error);
     }
   }, [apiDelete, loadModelRegistry, loadModels, showErrorStatus, showStatus]);
+
+  const onDeleteModelFamily = useCallback(async (family) => {
+    const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
+    if (isBaselineFamily) {
+      showStatus("The bundled baseline model cannot be deleted.", "error");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Permanently delete the model family "${family.name}" and all of its versions? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await apiDelete(`/models/families/${family.id}`);
+      const nextModels = await loadModels();
+      await loadModelRegistry();
+      setSelectedModelId((previousValue) => {
+        const stillExists = nextModels.some((model) => String(model.id) === String(previousValue));
+        return stillExists ? previousValue : (nextModels[0] ? String(nextModels[0].id) : "");
+      });
+      showStatus(`Deleted model "${family.name}".`, "info");
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiDelete, loadModelRegistry, loadModels, showErrorStatus, showStatus]);
+
+  const onOpenModelInfo = useCallback(async (modelVersionId) => {
+    try {
+      const response = await apiGet(`/models/versions/${modelVersionId}/report`);
+      setModelReport(response.report || null);
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [apiGet, showErrorStatus]);
+
+  const onExportModelVersion = useCallback(async (version) => {
+    try {
+      const defaultFileName = `${version.family_name || "model"}_${version.version_tag || "version"}.zip`;
+      const response = await window.desktopAPI.downloadBackendFile(
+        `/models/versions/${version.id}/export`,
+        defaultFileName
+      );
+      if (response?.saved) {
+        showStatus(`Export saved to ${response.filePath}.`, "info");
+      }
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [showErrorStatus, showStatus]);
 
   const onFinalizeReviewedRun = useCallback(async () => {
     if (!currentRun) {
@@ -576,17 +787,21 @@ function App() {
 
       <ModelsView
         visible={isModelsViewVisible}
-        trainingDatasets={trainingDatasets}
-        testDatasets={testDatasets}
         modelFamilies={modelFamilies}
         modelForm={modelRegistrationForm}
-        datasetForms={{ training: trainingDatasetForm, test: testDatasetForm }}
-        onUpdateDatasetForm={onUpdateDatasetForm}
-        onCreateTrainingDataset={() => onCreateDataset("training")}
-        onCreateTestDataset={() => onCreateDataset("test")}
         onUpdateModelForm={onUpdateModelForm}
+        onChooseModelFile={onChooseModelFile}
         onRegisterModel={onRegisterModel}
         onDeleteModelVersion={onDeleteModelVersion}
+        onDeleteModelFamily={onDeleteModelFamily}
+        onExportModelVersion={onExportModelVersion}
+        onOpenModelInfo={onOpenModelInfo}
+        onEvaluateModelVersion={onEvaluateModelVersion}
+        isModelModalOpen={isAddModelModalOpen}
+        onCloseModelModal={closeAddModelModal}
+        isSubmittingModel={isSubmittingModel}
+        modelReport={modelReport}
+        onCloseModelReport={() => setModelReport(null)}
       />
 
       <ImageDetailView

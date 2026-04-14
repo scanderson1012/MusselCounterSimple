@@ -9,6 +9,7 @@ This module is the backend API surface used by the Electron frontend. It coordin
 """
 
 from pathlib import Path
+from threading import Thread
 from typing import Any
 from typing import Literal
 import sqlite3
@@ -25,8 +26,10 @@ from pydantic import Field
 from backend.database import get_database_connection
 from backend.database import create_dataset_record
 from backend.database import create_detection_for_run_image
+from backend.database import delete_model_family
 from backend.database import delete_model_version
 from backend.database import finalize_run_into_replay_buffer
+from backend.database import get_or_create_dataset_record
 from backend.database import get_image_file_metadata_from_database
 from backend.database import get_model_version_by_id
 from backend.database import get_run_info_from_detection_id
@@ -52,6 +55,17 @@ from backend.predict_service import PredictServiceInput
 from backend.predict_service import execute_predict_request
 from backend.model_evaluation import evaluate_model_file
 from backend.model_evaluation import store_model_evaluation
+from backend.model_jobs import complete_model_job
+from backend.model_jobs import create_model_job
+from backend.model_jobs import fail_model_job
+from backend.model_jobs import get_model_job
+from backend.model_jobs import is_model_job_cancel_requested
+from backend.model_jobs import request_model_job_cancel
+from backend.model_jobs import update_model_job_progress
+from backend.model_jobs import update_model_job_stage
+from backend.model_documents import build_model_report_data
+from backend.model_documents import create_model_export_zip
+from backend.model_documents import render_model_report_html
 
 router = APIRouter()
 
@@ -107,8 +121,11 @@ class ModelRegisterRequest(BaseModel):
 
     source_model_path: str
     family_name: str | None = None
-    training_dataset_id: int
-    test_dataset_id: int
+    description: str
+    training_images_dir: str
+    training_labels_dir: str
+    test_images_dir: str
+    test_labels_dir: str
     architecture: str = "fasterrcnn_resnet50_fpn_v2"
     num_classes: int = 3
     notes: str | None = None
@@ -119,6 +136,63 @@ class ModelEvaluateRequest(BaseModel):
 
     test_dataset_id: int
     score_threshold: float = 0.5
+
+
+def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_version_id: int) -> None:
+    """Background worker for evaluating one stored model version on its assigned test set."""
+    try:
+        with get_database_connection() as database_connection:
+            version = get_model_version_by_id(database_connection, model_version_id)
+            if version is None:
+                raise ValueError("Model version not found")
+            if version.get("test_dataset_id") is None:
+                raise ValueError("This model version does not have an assigned test dataset")
+
+            existing_evaluation = version.get("latest_evaluation")
+            if existing_evaluation and int(existing_evaluation.get("test_dataset_id") or 0) == int(version["test_dataset_id"]):
+                raise ValueError("This model version has already been evaluated on its assigned test set")
+
+            test_dataset = next(
+                (
+                    dataset
+                    for dataset in list_test_datasets(database_connection)
+                    if int(dataset["id"]) == int(version["test_dataset_id"])
+                ),
+                None,
+            )
+            if test_dataset is None:
+                raise ValueError(f"Test dataset not found: {version['test_dataset_id']}")
+
+            evaluation_result = evaluate_model_file(
+                model_file_name=str(version["model_file_name"]),
+                images_dir=str(test_dataset["images_dir"]),
+                labels_dir=str(test_dataset["labels_dir"]),
+                class_mapping=dict(version["class_mapping"]),
+                progress_callback=lambda processed, total: update_model_job_progress(
+                    model_job_id, processed, total
+                ),
+                stage_callback=lambda stage: update_model_job_stage(model_job_id, stage),
+                should_cancel_callback=lambda: is_model_job_cancel_requested(model_job_id),
+            )
+            evaluation = store_model_evaluation(
+                database_connection=database_connection,
+                model_version_id=int(version["id"]),
+                test_dataset_id=int(version["test_dataset_id"]),
+                evaluation_result=evaluation_result,
+            )
+            database_connection.commit()
+
+            refreshed_version = get_model_version_by_id(database_connection, int(version["id"]))
+            if refreshed_version is None:
+                raise RuntimeError("Failed to reload the saved model version after evaluation")
+
+        complete_model_job(
+            model_job_id=model_job_id,
+            model_version=refreshed_version,
+            evaluation=evaluation,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
+        fail_model_job(model_job_id, str(error))
 
 
 @router.post("/predict")
@@ -393,49 +467,76 @@ def create_test_dataset(request: DatasetCreateRequest) -> dict[str, Any]:
 
 @router.post("/models/register")
 def register_model(request: ModelRegisterRequest) -> dict[str, Any]:
-    """Register a baseline model as v1, then evaluate it on the chosen test set."""
+    """Register a baseline model and its datasets without evaluating it yet."""
     try:
+        source_path = Path(request.source_model_path).expanduser().resolve()
+        if not str(request.description or "").strip():
+            raise RuntimeError("Model description is required.")
+        required_paths = {
+            "training_images_dir": request.training_images_dir,
+            "training_labels_dir": request.training_labels_dir,
+            "test_images_dir": request.test_images_dir,
+            "test_labels_dir": request.test_labels_dir,
+        }
+        for field_name, raw_value in required_paths.items():
+            if not str(raw_value or "").strip():
+                raise RuntimeError(f"{field_name} is required.")
+
         with get_database_connection() as database_connection:
+            inferred_family_name = (request.family_name or source_path.stem).strip()
+            training_dataset = get_or_create_dataset_record(
+                database_connection=database_connection,
+                table_name="training_datasets",
+                name=f"{inferred_family_name}_train",
+                images_dir=request.training_images_dir,
+                labels_dir=request.training_labels_dir,
+                description=f"Training dataset for {inferred_family_name}",
+            )
+            test_dataset = get_or_create_dataset_record(
+                database_connection=database_connection,
+                table_name="test_datasets",
+                name=f"{inferred_family_name}_test",
+                images_dir=request.test_images_dir,
+                labels_dir=request.test_labels_dir,
+                description=f"Test dataset for {inferred_family_name}",
+            )
             version = register_baseline_model(
                 database_connection=database_connection,
                 source_model_path=request.source_model_path,
                 family_name=request.family_name,
-                training_dataset_id=request.training_dataset_id,
-                test_dataset_id=request.test_dataset_id,
+                training_dataset_id=int(training_dataset["id"]),
+                test_dataset_id=int(test_dataset["id"]),
                 architecture=request.architecture,
                 num_classes=request.num_classes,
+                description=request.description,
                 notes=request.notes,
             )
-
-            test_dataset = next(
-                (
-                    dataset
-                    for dataset in list_test_datasets(database_connection)
-                    if int(dataset["id"]) == int(request.test_dataset_id)
-                ),
-                None,
-            )
-            if test_dataset is None:
-                raise ValueError(f"Test dataset not found: {request.test_dataset_id}")
-
-            evaluation_result = evaluate_model_file(
-                model_file_name=str(version["model_file_name"]),
-                images_dir=str(test_dataset["images_dir"]),
-                labels_dir=str(test_dataset["labels_dir"]),
-                class_mapping=dict(version["class_mapping"]),
-            )
-            evaluation = store_model_evaluation(
-                database_connection=database_connection,
-                model_version_id=int(version["id"]),
-                test_dataset_id=int(request.test_dataset_id),
-                evaluation_result=evaluation_result,
-            )
             database_connection.commit()
-
             refreshed_version = get_model_version_by_id(database_connection, int(version["id"]))
-        return {"model_version": refreshed_version, "evaluation": evaluation}
+        return {"model_version": refreshed_version}
     except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/models/jobs/{model_job_id}")
+def get_model_job_status(model_job_id: str) -> dict[str, Any]:
+    """Return one model-evaluation job snapshot."""
+    model_job = get_model_job(model_job_id)
+    if model_job is None:
+        raise HTTPException(status_code=404, detail="Model job not found")
+    return model_job
+
+
+@router.post("/models/jobs/{model_job_id}/cancel")
+def cancel_model_job_status(model_job_id: str) -> dict[str, Any]:
+    """Request cancellation for one running model evaluation job."""
+    cancelled = request_model_job_cancel(model_job_id)
+    if not cancelled:
+        raise HTTPException(status_code=400, detail="Model job cannot be cancelled")
+    model_job = get_model_job(model_job_id)
+    if model_job is None:
+        raise HTTPException(status_code=404, detail="Model job not found")
+    return model_job
 
 
 @router.post("/models/versions/{model_version_id}/evaluate")
@@ -482,15 +583,106 @@ def evaluate_registered_model(model_version_id: int, request: ModelEvaluateReque
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@router.post("/models/versions/{model_version_id}/evaluate-default")
+def evaluate_registered_model_on_assigned_test_set(model_version_id: int) -> dict[str, Any]:
+    """Evaluate one stored model version on its assigned test set exactly once."""
+    try:
+        with get_database_connection() as database_connection:
+            model_version = get_model_version_by_id(database_connection, model_version_id)
+            if model_version is None:
+                raise HTTPException(status_code=404, detail="Model version not found")
+            if model_version.get("test_dataset_id") is None:
+                raise HTTPException(status_code=400, detail="Model version has no assigned test dataset")
+
+            latest_evaluation = model_version.get("latest_evaluation")
+            if latest_evaluation and int(latest_evaluation.get("test_dataset_id") or 0) == int(model_version["test_dataset_id"]):
+                return {
+                    "already_evaluated": True,
+                    "message": "Evaluation already occurred for this model version on its assigned test set.",
+                    "model_version": model_version,
+                }
+
+            display_name = f"{model_version.get('family_name', 'model')} {model_version.get('version_tag', '')}".strip()
+            model_job = create_model_job(display_name=display_name)
+
+        worker = Thread(
+            target=_evaluate_model_version_on_assigned_test_set,
+            args=(str(model_job["model_job_id"]), int(model_version_id)),
+            daemon=True,
+        )
+        worker.start()
+        return model_job
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/models/versions/{model_version_id}/report")
+def get_model_version_report(model_version_id: int) -> dict[str, Any]:
+    """Return structured and rendered report content for one model version."""
+    with get_database_connection() as database_connection:
+        version = get_model_version_by_id(database_connection, model_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+
+    report = build_model_report_data(version)
+    return {
+        "report": report,
+        "document_html": render_model_report_html(report),
+    }
+
+
+@router.get("/models/versions/{model_version_id}/export", response_class=FileResponse)
+def export_model_version(model_version_id: int) -> FileResponse:
+    """Build and return a zip export for one model version."""
+    with get_database_connection() as database_connection:
+        version = get_model_version_by_id(database_connection, model_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Model version not found")
+
+    report = build_model_report_data(version)
+    zip_path = create_model_export_zip(
+        report=report,
+        model_file_path=str(version["model_file_name"]),
+    )
+    return FileResponse(
+        path=str(zip_path),
+        filename=zip_path.name,
+        media_type="application/zip",
+    )
+
+
 @router.delete("/models/versions/{model_version_id}")
 def remove_model_version(model_version_id: int) -> dict[str, Any]:
     """Delete one stored model version from the registry and disk."""
-    with get_database_connection() as database_connection:
-        deleted = delete_model_version(database_connection, model_version_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Model version not found")
-        database_connection.commit()
-        return {"families": list_model_registry(database_connection)}
+    try:
+        with get_database_connection() as database_connection:
+            deleted = delete_model_version(database_connection, model_version_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Model version not found")
+            database_connection.commit()
+            return {"families": list_model_registry(database_connection)}
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.delete("/models/families/{family_id}")
+def remove_model_family(family_id: int) -> dict[str, Any]:
+    """Delete every version in one stored model family."""
+    try:
+        with get_database_connection() as database_connection:
+            deleted = delete_model_family(database_connection, family_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Model family not found")
+            database_connection.commit()
+            return {"families": list_model_registry(database_connection)}
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.post("/images/upload")

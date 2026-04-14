@@ -25,6 +25,7 @@ function useRunActions({
   setLoading,
   setEditingDetection,
   goToRoute,
+  onOpenAddModelModal,
 }) {
   // Reset to a fresh run workspace and navigate back to the run page.
   const onStartNewRun = useCallback(() => {
@@ -36,27 +37,8 @@ function useRunActions({
 
   // Open native file picker for models, then refresh model list.
   const onAddModel = useCallback(async () => {
-    try {
-      const result = await window.desktopAPI.pickModelFile();
-      if (!result) {
-        return;
-      }
-
-      if (result.alreadyExists) {
-        showStatus(`Model "${result.fileName}" already exists.`, "info");
-      } else {
-        showStatus(`Model "${result.fileName}" added.`, "info");
-      }
-
-      const nextModels = await loadModels();
-      await loadModelRegistry();
-      if (nextModels.length > 0) {
-        setSelectedModelId(String(nextModels[0].id));
-      }
-    } catch (error) {
-      showStatus(String(error.message ?? error), "error");
-    }
-  }, [loadModelRegistry, loadModels, setSelectedModelId, showStatus]);
+    onOpenAddModelModal();
+  }, [onOpenAddModelModal]);
 
   // Open native file picker for images and merge with pending set.
   const onPickImages = useCallback(async () => {
@@ -81,7 +63,15 @@ function useRunActions({
     }
 
     setIsBusy(true);
-    setLoading({ visible: true, processedImages: 0, totalImages: 0 });
+    setLoading({
+      visible: true,
+      processedImages: 0,
+      totalImages: 0,
+      message: "Running model...",
+      estimatedRemainingSeconds: null,
+      canCancel: false,
+      onCancel: null,
+    });
     showStatus("Running model...", "info");
 
     try {
@@ -131,7 +121,15 @@ function useRunActions({
     } catch (error) {
       showStatus(String(error.message ?? error), "error");
     } finally {
-      setLoading({ visible: false, processedImages: 0, totalImages: 0 });
+      setLoading({
+        visible: false,
+        processedImages: 0,
+        totalImages: 0,
+        message: "",
+        estimatedRemainingSeconds: null,
+        canCancel: false,
+        onCancel: null,
+      });
       setIsBusy(false);
     }
   }, [

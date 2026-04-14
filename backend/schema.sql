@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
     class_mapping_json TEXT NOT NULL DEFAULT '{"1":"live","2":"dead"}',
     training_dataset_id INTEGER,
     test_dataset_id INTEGER,
+    description TEXT,
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

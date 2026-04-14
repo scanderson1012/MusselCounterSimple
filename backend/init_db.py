@@ -10,6 +10,7 @@ APP_DATA = Path(os.getenv("MUSSEL_APP_DATA_DIR", str(PROJECT_ROOT / "app_data"))
 DB_PATH = APP_DATA / "app.db"
 IMAGES_DIRECTORY = APP_DATA / "images"
 MODELS_DIRECTORY = APP_DATA / "models"
+EXPORTS_DIRECTORY = APP_DATA / "exports"
 SCHEMA_PATH = BACKEND_DIRECTORY / "schema.sql"
 BASELINE_MODEL_FAMILY_NAME = os.getenv("MUSSEL_BASELINE_MODEL_NAME", "fasterrcnn_baseline")
 BASELINE_MODEL_PATH = Path(
@@ -41,6 +42,12 @@ BASELINE_TEST_LABELS_DIR = Path(
 ).expanduser().resolve()
 BASELINE_TRAIN_DATASET_NAME = os.getenv("MUSSEL_BASELINE_TRAIN_DATASET_NAME", "baseline_train")
 BASELINE_TEST_DATASET_NAME = os.getenv("MUSSEL_BASELINE_TEST_DATASET_NAME", "baseline_test")
+BASELINE_MODEL_DESCRIPTION = (
+    "The is the baseline object detection model created by the Spring 2026 CMDA Capstone Mussel Milk team. "
+    "It is trained on images containing dead and live, juvenile Lampsilis cardium (Pocketbook mussels). "
+    "This model is meant to detect and classify this specific species. The model cannot be trusted to "
+    "accurately detect and classify other mussels species or ages."
+)
 
 
 def init_db() -> None:
@@ -48,6 +55,7 @@ def init_db() -> None:
     APP_DATA.mkdir(parents=True, exist_ok=True)
     IMAGES_DIRECTORY.mkdir(exist_ok=True)
     MODELS_DIRECTORY.mkdir(exist_ok=True)
+    EXPORTS_DIRECTORY.mkdir(exist_ok=True)
 
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
 
@@ -76,9 +84,18 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if replay_buffer_image_columns and "model_version_id" not in replay_buffer_image_columns:
         conn.execute("ALTER TABLE replay_buffer_images ADD COLUMN model_version_id INTEGER")
 
+    model_version_columns = set()
+    if _table_exists(conn, "model_versions"):
+        model_version_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(model_versions)").fetchall()
+        }
+    if model_version_columns and "description" not in model_version_columns:
+        conn.execute("ALTER TABLE model_versions ADD COLUMN description TEXT")
+
     # Backfill legacy disk models into the registry so existing installs still work.
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)
+        _backfill_bundled_baseline_description(conn)
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -206,27 +223,30 @@ def _seed_bundled_baseline(conn: sqlite3.Connection) -> None:
         family_name=BASELINE_MODEL_FAMILY_NAME,
         training_dataset_id=int(training_dataset["id"]),
         test_dataset_id=int(test_dataset["id"]),
+        description=BASELINE_MODEL_DESCRIPTION,
         notes="Bundled baseline model auto-registered on first launch.",
     )
-    try:
-        from backend.model_evaluation import evaluate_model_file
-        from backend.model_evaluation import store_model_evaluation
+    # The bundled baseline should be registered automatically, but users trigger
+    # evaluation manually from the Models page.
 
-        evaluation_result = evaluate_model_file(
-            model_file_name=str(model_version["model_file_name"]),
-            images_dir=str(test_dataset["images_dir"]),
-            labels_dir=str(test_dataset["labels_dir"]),
-            class_mapping=dict(model_version["class_mapping"]),
+
+def _backfill_bundled_baseline_description(conn: sqlite3.Connection) -> None:
+    """Populate the bundled baseline description for older local databases."""
+    conn.execute(
+        """
+        UPDATE model_versions
+        SET description = ?
+        WHERE id IN (
+            SELECT model_versions.id
+            FROM model_versions
+            JOIN model_families ON model_families.id = model_versions.family_id
+            WHERE model_families.name = ?
+              AND model_versions.version_number = 1
+              AND (model_versions.description IS NULL OR TRIM(model_versions.description) = '')
         )
-        store_model_evaluation(
-            database_connection=conn,
-            model_version_id=int(model_version["id"]),
-            test_dataset_id=int(test_dataset["id"]),
-            evaluation_result=evaluation_result,
-        )
-    except ModuleNotFoundError:
-        # Allow startup to succeed before optional eval dependencies are installed.
-        return
+        """,
+        (BASELINE_MODEL_DESCRIPTION, BASELINE_MODEL_FAMILY_NAME),
+    )
 
 
 def _get_or_create_seed_dataset(

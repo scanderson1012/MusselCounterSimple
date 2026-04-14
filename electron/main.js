@@ -288,7 +288,7 @@ ipcMain.handle("backend:request", async (_event, request) => {
   return responseData;
 });
 
-// IPC endpoint: open native file picker for model files and copy selected model into models dir.
+// IPC endpoint: open native file picker for a model file and return its path.
 ipcMain.handle("dialog:pick-model", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "Select Model File",
@@ -305,24 +305,32 @@ ipcMain.handle("dialog:pick-model", async () => {
 
   const sourcePath = result.filePaths[0];
   const fileName = path.basename(sourcePath);
+  return { fileName, filePath: sourcePath };
+});
 
-  // Ask backend where model files should live on this machine.
-  let modelsDir;
-  try {
-    const response = await fetch(`${backendBaseUrl}/models`);
-    const data = await response.json();
-    modelsDir = data.models_dir;
-  } catch {
-    throw new Error("Could not determine models directory from backend.");
+// IPC endpoint: download one backend-served file through a save dialog.
+ipcMain.handle("backend:download-file", async (_event, request) => {
+  const apiPath = String(request?.apiPath ?? "/");
+  const normalizedPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  const defaultFileName = String(request?.defaultFileName ?? "download.bin");
+
+  const saveResult = await dialog.showSaveDialog(mainWindow, {
+    title: "Export Model",
+    defaultPath: defaultFileName,
+  });
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { saved: false };
   }
 
-  const destPath = path.join(modelsDir, fileName);
-  if (fs.existsSync(destPath)) {
-    return { fileName, alreadyExists: true };
+  const response = await fetch(`${backendBaseUrl}${normalizedPath}`);
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(responseText || `Download failed with status ${response.status}`);
   }
 
-  fs.copyFileSync(sourcePath, destPath);
-  return { fileName, alreadyExists: false };
+  const arrayBuffer = await response.arrayBuffer();
+  fs.writeFileSync(saveResult.filePath, Buffer.from(arrayBuffer));
+  return { saved: true, filePath: saveResult.filePath };
 });
 
 // IPC endpoint: open native file picker for input images.

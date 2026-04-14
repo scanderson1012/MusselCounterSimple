@@ -20,7 +20,9 @@ from backend.db.runs import update_run_mussel_count
 from backend.db.runs import update_this_runs_model
 from backend.db.runs import update_run_threshold
 from backend.model_registry import create_dataset_record
+from backend.model_registry import delete_model_family
 from backend.model_registry import delete_model_version
+from backend.model_registry import get_or_create_dataset_record
 from backend.model_registry import get_model_file_name_for_run
 from backend.model_registry import get_model_version_by_id
 from backend.model_registry import list_model_options
@@ -36,12 +38,14 @@ from backend.replay_buffer import remove_replay_buffer_entry_for_run_image
 __all__ = [
     "create_run",
     "create_dataset_record",
+    "delete_model_family",
     "delete_model_version",
     "create_detection_for_run_image",
     "finalize_run_into_replay_buffer",
     "get_database_connection",
     "get_image_file_metadata_from_database",
     "get_model_file_name_for_run",
+    "get_or_create_dataset_record",
     "get_run_info_from_detection_id",
     "get_replay_buffer_summary_for_run",
     "get_run_from_database",
