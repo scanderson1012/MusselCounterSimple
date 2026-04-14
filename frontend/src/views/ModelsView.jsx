@@ -49,6 +49,7 @@ function ModelsView({
   onExportModelVersion,
   onOpenModelInfo,
   onEvaluateModelVersion,
+  onFineTuneModelVersion,
   isModelModalOpen,
   onCloseModelModal,
   isSubmittingModel,
@@ -117,6 +118,11 @@ function ModelsView({
                       </div>
 
                       <div className="model-version-actions">
+                        {version.is_latest_version ? (
+                          <button className="ghost" onClick={() => onFineTuneModelVersion({ ...version, family_name: family.name })}>
+                            Fine-Tune
+                          </button>
+                        ) : null}
                         <button className="ghost" onClick={() => onEvaluateModelVersion({ ...version, family_name: family.name })}>
                           Evaluate on Test Set
                         </button>
@@ -232,7 +238,7 @@ function ModelsView({
               </div>
 
               <button className="primary modal-wide-btn" onClick={onRegisterModel} disabled={isSubmittingModel}>
-                {isSubmittingModel ? "Registering and Evaluating..." : "Register and Evaluate v1"}
+                {isSubmittingModel ? "Registering..." : "Register Model"}
               </button>
             </div>
           </div>

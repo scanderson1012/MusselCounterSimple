@@ -1,4 +1,4 @@
-"""In-memory background job state for model registration and evaluation."""
+"""In-memory background job state for model evaluation and fine-tuning."""
 
 from __future__ import annotations
 
@@ -18,16 +18,17 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def create_model_job(display_name: str) -> dict[str, Any]:
+def create_model_job(display_name: str, job_type: str = "evaluation") -> dict[str, Any]:
     """Create one active model job and return its initial state."""
     global _MODEL_JOB_DATA
 
     model_job_id = uuid4().hex
     model_job_data = {
         "model_job_id": model_job_id,
+        "job_type": str(job_type),
         "status": "running",
         "display_name": display_name,
-        "stage": "Preparing model registration",
+        "stage": "Preparing model job",
         "processed_images": 0,
         "total_images": 0,
         "estimated_remaining_seconds": None,
@@ -35,6 +36,7 @@ def create_model_job(display_name: str) -> dict[str, Any]:
         "cancel_requested": False,
         "model_version": None,
         "evaluation": None,
+        "fine_tune_result": None,
         "created_at": _iso_now(),
         "updated_at": _iso_now(),
     }
@@ -95,9 +97,8 @@ def request_model_job_cancel(model_job_id: str) -> bool:
         if _MODEL_JOB_DATA["status"] != "running":
             return False
         _MODEL_JOB_DATA["cancel_requested"] = True
-        _MODEL_JOB_DATA["status"] = "cancelled"
-        _MODEL_JOB_DATA["stage"] = "Evaluation cancelled"
-        _MODEL_JOB_DATA["estimated_remaining_seconds"] = 0
+        _MODEL_JOB_DATA["status"] = "cancelling"
+        _MODEL_JOB_DATA["stage"] = "Cancelling model job"
         _MODEL_JOB_DATA["updated_at"] = _iso_now()
         return True
 
@@ -113,19 +114,34 @@ def is_model_job_cancel_requested(model_job_id: str) -> bool:
 def complete_model_job(
     model_job_id: str,
     model_version: dict[str, Any],
-    evaluation: dict[str, Any],
+    evaluation: dict[str, Any] | None = None,
+    fine_tune_result: dict[str, Any] | None = None,
 ) -> None:
     with _MODEL_JOB_LOCK:
         if _MODEL_JOB_DATA is None or _MODEL_JOB_DATA["model_job_id"] != model_job_id:
             return
-        if _MODEL_JOB_DATA["status"] != "running":
+        if _MODEL_JOB_DATA["status"] not in {"running", "cancelling"}:
+            return
+        if _MODEL_JOB_DATA["cancel_requested"]:
             return
         _MODEL_JOB_DATA["status"] = "completed"
-        _MODEL_JOB_DATA["stage"] = "Evaluation complete"
+        _MODEL_JOB_DATA["stage"] = "Model job complete"
         _MODEL_JOB_DATA["processed_images"] = int(_MODEL_JOB_DATA["total_images"])
         _MODEL_JOB_DATA["estimated_remaining_seconds"] = 0
         _MODEL_JOB_DATA["model_version"] = deepcopy(model_version)
         _MODEL_JOB_DATA["evaluation"] = deepcopy(evaluation)
+        _MODEL_JOB_DATA["fine_tune_result"] = deepcopy(fine_tune_result)
+        _MODEL_JOB_DATA["updated_at"] = _iso_now()
+
+
+def cancel_model_job(model_job_id: str, message: str = "Model job cancelled") -> None:
+    """Finalize one cancellation-requested model job."""
+    with _MODEL_JOB_LOCK:
+        if _MODEL_JOB_DATA is None or _MODEL_JOB_DATA["model_job_id"] != model_job_id:
+            return
+        _MODEL_JOB_DATA["status"] = "cancelled"
+        _MODEL_JOB_DATA["stage"] = str(message)
+        _MODEL_JOB_DATA["estimated_remaining_seconds"] = 0
         _MODEL_JOB_DATA["updated_at"] = _iso_now()
 
 
@@ -133,7 +149,7 @@ def fail_model_job(model_job_id: str, error_message: str) -> None:
     with _MODEL_JOB_LOCK:
         if _MODEL_JOB_DATA is None or _MODEL_JOB_DATA["model_job_id"] != model_job_id:
             return
-        if _MODEL_JOB_DATA["status"] == "cancelled":
+        if _MODEL_JOB_DATA["status"] in {"cancelled", "cancelling"}:
             _MODEL_JOB_DATA["error_message"] = str(error_message)
             _MODEL_JOB_DATA["updated_at"] = _iso_now()
             return

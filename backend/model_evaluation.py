@@ -147,6 +147,8 @@ def evaluate_model_file(
         if progress_callback is not None:
             progress_callback(batch_index, total_batches)
 
+    if should_cancel_callback is not None and should_cancel_callback():
+        raise RuntimeError("Evaluation cancelled by user.")
     if stage_callback is not None:
         stage_callback("Summarizing evaluation metrics")
     raw_results = mean_average_precision.compute()

@@ -65,7 +65,13 @@ def get_run_from_database(database_connection: sqlite3.Connection, run_id: int) 
             images.stored_path,
             run_images.live_mussel_count,
             run_images.dead_mussel_count,
-            run_images.created_at
+            run_images.created_at,
+            EXISTS(
+                SELECT 1
+                FROM replay_buffer_images
+                WHERE replay_buffer_images.run_image_id = run_images.id
+                  AND replay_buffer_images.consumed_in_model_version_id IS NOT NULL
+            ) AS is_locked_for_editing
         FROM run_images
         JOIN images ON images.id = run_images.image_id
         WHERE run_images.run_id = ?

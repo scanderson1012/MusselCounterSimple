@@ -19,9 +19,11 @@ from backend.db.runs import run_exists
 from backend.db.runs import update_run_mussel_count
 from backend.db.runs import update_this_runs_model
 from backend.db.runs import update_run_threshold
+from backend.model_registry import build_model_file_path_for_version
 from backend.model_registry import create_dataset_record
 from backend.model_registry import delete_model_family
 from backend.model_registry import delete_model_version
+from backend.model_registry import get_next_version_number_for_family
 from backend.model_registry import get_or_create_dataset_record
 from backend.model_registry import get_model_file_name_for_run
 from backend.model_registry import get_model_version_by_id
@@ -30,13 +32,20 @@ from backend.model_registry import list_model_registry
 from backend.model_registry import list_test_datasets
 from backend.model_registry import list_training_datasets
 from backend.model_registry import register_baseline_model
+from backend.model_registry import register_finetuned_model_version
 from backend.replay_buffer import finalize_run_into_replay_buffer
 from backend.replay_buffer import get_replay_buffer_summary_for_run
+from backend.replay_buffer import get_replay_buffer_detections_for_images
+from backend.replay_buffer import list_consumed_replay_buffer_images_through_version
+from backend.replay_buffer import list_pending_replay_buffer_images_for_model
 from backend.replay_buffer import list_replay_buffer_counts_by_model
+from backend.replay_buffer import mark_replay_buffer_images_consumed
+from backend.replay_buffer import is_run_image_locked_for_editing
 from backend.replay_buffer import remove_replay_buffer_entry_for_run_image
 
 __all__ = [
     "create_run",
+    "build_model_file_path_for_version",
     "create_dataset_record",
     "delete_model_family",
     "delete_model_version",
@@ -44,9 +53,11 @@ __all__ = [
     "finalize_run_into_replay_buffer",
     "get_database_connection",
     "get_image_file_metadata_from_database",
+    "get_next_version_number_for_family",
     "get_model_file_name_for_run",
     "get_or_create_dataset_record",
     "get_run_info_from_detection_id",
+    "get_replay_buffer_detections_for_images",
     "get_replay_buffer_summary_for_run",
     "get_run_from_database",
     "get_model_name_from_run_id",
@@ -55,7 +66,10 @@ __all__ = [
     "link_image_to_run",
     "list_model_options",
     "list_model_registry",
+    "list_consumed_replay_buffer_images_through_version",
+    "list_pending_replay_buffer_images_for_model",
     "list_replay_buffer_counts_by_model",
+    "is_run_image_locked_for_editing",
     "remove_replay_buffer_entry_for_run_image",
     "list_run_image_ids",
     "list_runs_from_database",
@@ -64,7 +78,9 @@ __all__ = [
     "recalculate_run_mussel_counts_from_detections",
     "recalculate_run_image_mussel_counts_from_detections",
     "register_baseline_model",
+    "register_finetuned_model_version",
     "run_exists",
+    "mark_replay_buffer_images_consumed",
     "update_detection_fields",
     "update_run_mussel_count",
     "unlink_image_from_run",

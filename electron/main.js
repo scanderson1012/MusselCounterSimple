@@ -262,7 +262,12 @@ ipcMain.handle("backend:request", async (_event, request) => {
     options.body = JSON.stringify(request.body);
   }
 
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    throw new Error(`Could not reach the backend. ${String(error?.message ?? error)}`);
+  }
   const responseText = await response.text();
 
   // Try JSON first; fall back to plain text.
@@ -322,7 +327,12 @@ ipcMain.handle("backend:download-file", async (_event, request) => {
     return { saved: false };
   }
 
-  const response = await fetch(`${backendBaseUrl}${normalizedPath}`);
+  let response;
+  try {
+    response = await fetch(`${backendBaseUrl}${normalizedPath}`);
+  } catch (error) {
+    throw new Error(`Could not reach the backend. ${String(error?.message ?? error)}`);
+  }
   if (!response.ok) {
     const responseText = await response.text();
     throw new Error(responseText || `Download failed with status ${response.status}`);

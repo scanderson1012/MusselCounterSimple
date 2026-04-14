@@ -18,6 +18,7 @@ import HistoryView from "./views/HistoryView.jsx";
 import ImageDetailView from "./views/ImageDetailView.jsx";
 import ModelsView from "./views/ModelsView.jsx";
 import RunView from "./views/RunView.jsx";
+import SettingsView from "./views/SettingsView.jsx";
 
 function App() {
   const statusTimeoutRef = useRef(null);
@@ -50,6 +51,15 @@ function App() {
   const [isAddModelModalOpen, setIsAddModelModalOpen] = useState(false);
   const [isSubmittingModel, setIsSubmittingModel] = useState(false);
   const [modelReport, setModelReport] = useState(null);
+  const [appSettings, setAppSettings] = useState({
+    fine_tune_min_new_images: 10,
+    fine_tune_num_epochs: 5,
+  });
+  const [draftAppSettings, setDraftAppSettings] = useState({
+    fine_tune_min_new_images: "10",
+    fine_tune_num_epochs: "5",
+  });
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [modelRegistrationForm, setModelRegistrationForm] = useState({
     source_model_path: "",
     selected_model_file_name: "",
@@ -62,7 +72,14 @@ function App() {
     notes: "",
   });
 
-  const toErrorMessage = useCallback((error) => String(error?.message ?? error), []);
+  const toErrorMessage = useCallback((error) => {
+    const rawMessage = String(error?.message ?? error ?? "");
+    const requestFailureMatch = rawMessage.match(/^Request failed \([^)]+\):\s*(.+)$/);
+    if (requestFailureMatch) {
+      return requestFailureMatch[1];
+    }
+    return rawMessage;
+  }, []);
   const goToRoute = useCallback((targetRoute) => {
     const currentRoute = window.location.hash.replace(/^#/, "");
     if (currentRoute === targetRoute) {
@@ -145,6 +162,21 @@ function App() {
     return nextRuns;
   }, [apiGet]);
 
+  const loadSettings = useCallback(async () => {
+    const response = await apiGet("/settings");
+    const nextSettings = response.settings || {};
+    const normalizedSettings = {
+      fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || 10,
+      fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || 5,
+    };
+    setAppSettings(normalizedSettings);
+    setDraftAppSettings({
+      fine_tune_min_new_images: String(normalizedSettings.fine_tune_min_new_images),
+      fine_tune_num_epochs: String(normalizedSettings.fine_tune_num_epochs),
+    });
+    return normalizedSettings;
+  }, [apiGet]);
+
   const loadRun = useCallback(async (runId) => {
     const runData = await apiGet(`/runs/${runId}`);
     setCurrentRun(runData);
@@ -209,11 +241,15 @@ function App() {
       if (modelJobData.status === "completed") {
         return modelJobData;
       }
+      if (modelJobData.status === "cancelling") {
+        await waitMilliseconds(RUN_JOB_POLL_INTERVAL_MS);
+        continue;
+      }
       if (modelJobData.status === "cancelled") {
         return modelJobData;
       }
       if (modelJobData.status === "failed") {
-        throw new Error(modelJobData.error_message || "Model evaluation failed.");
+        throw new Error(modelJobData.error_message || "Model job failed.");
       }
       await waitMilliseconds(RUN_JOB_POLL_INTERVAL_MS);
     }
@@ -250,6 +286,7 @@ function App() {
           loadTrainingDatasets(),
           loadTestDatasets(),
           loadRuns(),
+          loadSettings(),
         ]);
 
         if (isMounted && nextModels.length > 0) {
@@ -270,7 +307,7 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, [loadModelRegistry, loadModels, loadRuns, loadTestDatasets, loadTrainingDatasets, showStatus, waitForBackend]);
+  }, [loadModelRegistry, loadModels, loadRuns, loadSettings, loadTestDatasets, loadTrainingDatasets, showStatus, waitForBackend]);
 
   useEffect(() => {
     if (models.length === 0) {
@@ -347,6 +384,7 @@ function App() {
   const isHistoryViewVisible = route.kind === "history";
   const isImageDetailViewVisible = route.kind === "image";
   const isModelsViewVisible = route.kind === "models";
+  const isSettingsViewVisible = route.kind === "settings";
 
   const openAddModelModal = useCallback(() => {
     setIsAddModelModalOpen(true);
@@ -474,6 +512,36 @@ function App() {
   const onUpdateModelForm = useCallback((fieldName, value) => {
     setModelRegistrationForm((previousValue) => ({ ...previousValue, [fieldName]: value }));
   }, []);
+
+  const onChangeAppSetting = useCallback((fieldName, value) => {
+    setDraftAppSettings((previousValue) => ({ ...previousValue, [fieldName]: value }));
+  }, []);
+
+  const onSaveSettings = useCallback(async () => {
+    try {
+      setIsSavingSettings(true);
+      const payload = {
+        fine_tune_min_new_images: Math.max(1, Number(draftAppSettings.fine_tune_min_new_images) || 1),
+        fine_tune_num_epochs: Math.max(1, Number(draftAppSettings.fine_tune_num_epochs) || 1),
+      };
+      const response = await apiPatch("/settings", payload);
+      const nextSettings = response.settings || payload;
+      setAppSettings({
+        fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || payload.fine_tune_min_new_images,
+        fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || payload.fine_tune_num_epochs,
+      });
+      setDraftAppSettings({
+        fine_tune_min_new_images: String(nextSettings.fine_tune_min_new_images || payload.fine_tune_min_new_images),
+        fine_tune_num_epochs: String(nextSettings.fine_tune_num_epochs || payload.fine_tune_num_epochs),
+      });
+      showStatus("Settings saved.", "info");
+      await loadModelRegistry();
+    } catch (error) {
+      showErrorStatus(error);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }, [apiPatch, draftAppSettings, loadModelRegistry, showErrorStatus, showStatus]);
 
   const onChooseModelFile = useCallback(async () => {
     try {
@@ -610,6 +678,56 @@ function App() {
     }
   }, [apiPost, loadModelRegistry, loadModels, pollModelJobUntilDone, showErrorStatus, showStatus]);
 
+  const onFineTuneModelVersion = useCallback(async (version) => {
+    try {
+      setLoading({
+        visible: true,
+        processedImages: 0,
+        totalImages: 0,
+        message: `Preparing fine-tuning for ${version.family_name} ${version.version_tag}...`,
+        estimatedRemainingSeconds: null,
+        canCancel: false,
+        onCancel: null,
+      });
+      const response = await apiPost(`/models/versions/${version.id}/fine-tune`, {});
+      setLoading((previousValue) => ({
+        ...previousValue,
+        canCancel: true,
+        onCancel: async () => {
+          try {
+            await apiPost(`/models/jobs/${response.model_job_id}/cancel`, {});
+            showStatus("Cancellation requested for fine-tuning.", "info");
+          } catch (error) {
+            showErrorStatus(error);
+          }
+        },
+      }));
+
+      const finalJob = await pollModelJobUntilDone(response.model_job_id);
+      await Promise.all([loadModels(), loadModelRegistry()]);
+      if (finalJob.status === "cancelled") {
+        showStatus(`Fine-tuning cancelled for ${version.family_name} ${version.version_tag}.`, "info");
+        return;
+      }
+      if (finalJob.model_version?.id) {
+        setSelectedModelId(String(finalJob.model_version.id));
+      }
+      showStatus(`Fine-tuning complete. ${version.family_name} ${finalJob.model_version?.version_tag || ""} is ready.`, "info");
+    } catch (error) {
+      showErrorStatus(error);
+    } finally {
+      setLoading({
+        visible: false,
+        processedImages: 0,
+        totalImages: 0,
+        message: "",
+        estimatedRemainingSeconds: null,
+        canCancel: false,
+        onCancel: null,
+      });
+    }
+  }, [apiPost, loadModelRegistry, loadModels, pollModelJobUntilDone, showErrorStatus, showStatus]);
+
   const onDeleteModelVersion = useCallback(async (version) => {
     const versionNumber = Number(version.version_number || 0);
     const isBaselineFamily = String(version.family_name || "").toLowerCase() === "fasterrcnn_baseline";
@@ -711,11 +829,15 @@ function App() {
   }, [apiPost, currentRun, loadModelRegistry, showErrorStatus, showStatus]);
 
   const onStartDrawingBox = useCallback(() => {
+    if (detailImage?.is_locked_for_editing) {
+      showStatus("This image has already been used for fine-tuning and is now read-only.", "error");
+      return;
+    }
     setEditingDetection(null);
     setDraftDetection(null);
     setIsDrawingBox(true);
     showStatus("Drag on the image to create a new box, then move or resize it before saving.", "info");
-  }, [showStatus]);
+  }, [detailImage?.is_locked_for_editing, showStatus]);
 
   const onCancelDraftDetection = useCallback(() => {
     setDraftDetection(null);
@@ -742,18 +864,58 @@ function App() {
     });
   }, [createDetection, detailImage, draftDetection, showStatus]);
 
+  const fineTuneNotification = useMemo(() => {
+    const threshold = Number(appSettings.fine_tune_min_new_images) || 0;
+    if (threshold <= 0) {
+      return null;
+    }
+    for (const family of modelFamilies) {
+      const latestVersion = Array.isArray(family.versions)
+        ? family.versions.find((version) => version.is_latest_version)
+        : null;
+      if (!latestVersion) {
+        continue;
+      }
+      const pendingImageCount = Number(latestVersion.replay_buffer_counts?.image_count || 0);
+      const pendingDetectionCount = Number(latestVersion.replay_buffer_counts?.detection_count || 0);
+      if (pendingImageCount >= threshold) {
+        return {
+          familyName: family.name,
+          versionTag: latestVersion.version_tag,
+          imageCount: pendingImageCount,
+          detectionCount: pendingDetectionCount,
+        };
+      }
+    }
+    return null;
+  }, [appSettings.fine_tune_min_new_images, modelFamilies]);
+
   return (
     <div className="shell">
       <TopBar
         onGoHome={() => goToRoute("/")}
         onGoHistory={() => goToRoute("/history")}
         onGoModels={() => goToRoute("/models")}
+        onGoSettings={() => goToRoute("/settings")}
         onAddModel={onAddModel}
         onStartNewRun={onStartNewRun}
       />
 
       <StatusBanner status={status} />
       <LoadingBar loading={loading} />
+      {fineTuneNotification ? (
+        <div className="panel fine-tune-notice">
+          <div>
+            <p className="fine-tune-notice-title">Fine-Tuning Available</p>
+            <p className="helper">
+              {fineTuneNotification.familyName} {fineTuneNotification.versionTag} has {fineTuneNotification.imageCount} new replay-buffer images and {fineTuneNotification.detectionCount} mussels ready for fine-tuning.
+            </p>
+          </div>
+          <button className="ghost" onClick={() => goToRoute("/models")}>
+            Open Models
+          </button>
+        </div>
+      ) : null}
 
       <RunView
         visible={isRunViewVisible}
@@ -797,11 +959,21 @@ function App() {
         onExportModelVersion={onExportModelVersion}
         onOpenModelInfo={onOpenModelInfo}
         onEvaluateModelVersion={onEvaluateModelVersion}
+        onFineTuneModelVersion={onFineTuneModelVersion}
         isModelModalOpen={isAddModelModalOpen}
         onCloseModelModal={closeAddModelModal}
         isSubmittingModel={isSubmittingModel}
         modelReport={modelReport}
         onCloseModelReport={() => setModelReport(null)}
+      />
+
+      <SettingsView
+        visible={isSettingsViewVisible}
+        settings={appSettings}
+        draftSettings={draftAppSettings}
+        onChangeSetting={onChangeAppSetting}
+        onSaveSettings={onSaveSettings}
+        isSavingSettings={isSavingSettings}
       />
 
       <ImageDetailView
@@ -820,7 +992,13 @@ function App() {
         onCanvasMouseUp={onCanvasMouseUp}
         detailCounts={detailCounts}
         detectionsForList={detectionsForList}
-        onOpenDetection={setEditingDetection}
+        onOpenDetection={(detection) => {
+          if (detailImage?.is_locked_for_editing) {
+            showStatus("This image has already been used for fine-tuning and is now read-only.", "error");
+            return;
+          }
+          setEditingDetection(detection);
+        }}
         onBack={backToRunOrHome}
         isDrawingBox={isDrawingBox}
         draftDetection={draftDetection}

@@ -46,7 +46,7 @@ function ImageDetailView({
             />
             <span>Bounding Boxes</span>
           </label>
-          <button className="ghost" onClick={onStartDrawingBox}>
+          <button className="ghost" onClick={onStartDrawingBox} disabled={detailImage?.is_locked_for_editing}>
             Add Bounding Box
           </button>
         </div>
@@ -75,6 +75,11 @@ function ImageDetailView({
           {isDrawingBox ? (
             <p className="helper detail-draw-helper">
               Drag to create a box. Drag inside the box to move it. Drag the corner handles to resize and change aspect ratio.
+            </p>
+          ) : null}
+          {detailImage?.is_locked_for_editing ? (
+            <p className="helper detail-draw-helper">
+              This image has already been used for fine-tuning and is now read-only.
             </p>
           ) : null}
         </div>
@@ -150,7 +155,7 @@ function ImageDetailView({
                 detectionsForList.map((detection) => (
                   <div
                     key={detection.id}
-                    className={`detection-list-item${detection.is_deleted ? " is-deleted" : ""}`}
+                    className={`detection-list-item${detection.is_deleted ? " is-deleted" : ""}${detailImage?.is_locked_for_editing ? " is-locked" : ""}`}
                     onClick={() => onOpenDetection(detection)}
                   >
                     <span className={`detection-list-tag ${detection.class_name}`}>{detection.class_name}</span>

@@ -11,6 +11,7 @@ from typing import Any
 from backend.init_db import BASELINE_MODEL_FAMILY_NAME
 from backend.init_db import MODELS_DIRECTORY
 from backend.replay_buffer import list_replay_buffer_counts_by_model
+from backend.replay_buffer import restore_replay_buffer_images_to_model
 
 DEFAULT_CLASS_MAPPING = {
     "1": "live",
@@ -200,6 +201,7 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
             """
             SELECT
                 model_versions.id,
+                model_versions.family_id,
                 model_versions.version_number,
                 model_versions.version_tag,
                 model_versions.parent_version_id,
@@ -233,6 +235,7 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
         ).fetchall()
 
         family_data["versions"] = []
+        latest_version_number = max((int(version_row["version_number"]) for version_row in versions), default=0)
         for version_row in versions:
             version_data = dict(version_row)
             version_data["class_mapping"] = _parse_json(version_data.pop("class_mapping_json"), DEFAULT_CLASS_MAPPING)
@@ -269,6 +272,7 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
                 int(version_data["id"]),
                 {"image_count": 0, "detection_count": 0},
             )
+            version_data["is_latest_version"] = int(version_data["version_number"]) == latest_version_number
             family_data["versions"].append(version_data)
 
         families.append(family_data)
@@ -488,6 +492,7 @@ def delete_model_version(
         SELECT
             id,
             family_id,
+            version_number,
             model_file_name
         FROM model_versions
         WHERE family_id = ? AND version_number >= ?
@@ -495,6 +500,25 @@ def delete_model_version(
         """,
         (int(row["family_id"]), int(row["version_number"])),
     ).fetchall()
+    deleted_version_ids = [int(version_row["id"]) for version_row in rows_to_delete]
+    surviving_latest_row = database_connection.execute(
+        """
+        SELECT id
+        FROM model_versions
+        WHERE family_id = ? AND version_number < ?
+        ORDER BY version_number DESC
+        LIMIT 1
+        """,
+        (int(row["family_id"]), int(row["version_number"])),
+    ).fetchone()
+    restored_model_version_id = (
+        None if surviving_latest_row is None else int(surviving_latest_row["id"])
+    )
+    restore_replay_buffer_images_to_model(
+        database_connection=database_connection,
+        deleted_version_ids=deleted_version_ids,
+        restored_model_version_id=restored_model_version_id,
+    )
     for version_row in rows_to_delete:
         model_path = Path(str(version_row["model_file_name"])).expanduser().resolve()
         if model_path.is_file():
@@ -568,8 +592,35 @@ def delete_model_family(
     if not rows:
         return True
 
-    for row in rows:
-        delete_model_version(database_connection, int(row["id"]))
+    restore_replay_buffer_images_to_model(
+        database_connection=database_connection,
+        deleted_version_ids=[int(row["id"]) for row in rows],
+        restored_model_version_id=None,
+    )
+
+    version_rows = database_connection.execute(
+        """
+        SELECT
+            id,
+            model_file_name
+        FROM model_versions
+        WHERE family_id = ?
+        ORDER BY version_number DESC
+        """,
+        (family_id,),
+    ).fetchall()
+    for version_row in version_rows:
+        model_path = Path(str(version_row["model_file_name"])).expanduser().resolve()
+        if model_path.is_file():
+            model_path.unlink(missing_ok=True)
+        _delete_empty_parent_directories(model_path)
+    database_connection.execute(
+        """
+        DELETE FROM model_versions
+        WHERE family_id = ?
+        """,
+        (family_id,),
+    )
     database_connection.execute(
         """
         DELETE FROM model_families
@@ -617,6 +668,105 @@ def _get_next_version_number(database_connection: sqlite3.Connection, family_id:
     while version_number in existing_numbers:
         version_number += 1
     return version_number
+
+
+def get_next_version_number_for_family(database_connection: sqlite3.Connection, family_id: int) -> int:
+    """Public helper for next available version number within one family."""
+    return _get_next_version_number(database_connection, family_id)
+
+
+def register_finetuned_model_version(
+    database_connection: sqlite3.Connection,
+    parent_version_id: int,
+    model_file_path: str,
+) -> dict[str, Any]:
+    """Register one saved fine-tuned checkpoint as the next version in a family."""
+    parent_row = database_connection.execute(
+        """
+        SELECT
+            model_versions.id,
+            model_versions.family_id,
+            model_versions.version_number,
+            model_versions.original_file_name,
+            model_versions.architecture,
+            model_versions.num_classes,
+            model_versions.class_mapping_json,
+            model_versions.training_dataset_id,
+            model_versions.test_dataset_id,
+            model_versions.description,
+            model_versions.notes
+        FROM model_versions
+        WHERE model_versions.id = ?
+        """,
+        (int(parent_version_id),),
+    ).fetchone()
+    if parent_row is None:
+        raise ValueError("Parent model version not found.")
+
+    model_path = Path(model_file_path).expanduser().resolve()
+    if not model_path.is_file():
+        raise FileNotFoundError(f"Fine-tuned model file not found: {model_path}")
+
+    next_version_number = _get_next_version_number(database_connection, int(parent_row["family_id"]))
+    cursor = database_connection.execute(
+        """
+        INSERT INTO model_versions (
+            family_id,
+            version_number,
+            version_tag,
+            parent_version_id,
+            original_file_name,
+            model_file_name,
+            file_size_bytes,
+            architecture,
+            num_classes,
+            class_mapping_json,
+            training_dataset_id,
+            test_dataset_id,
+            description,
+            notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(parent_row["family_id"]),
+            next_version_number,
+            f"v{next_version_number}",
+            int(parent_row["id"]),
+            str(parent_row["original_file_name"]),
+            str(model_path),
+            int(model_path.stat().st_size),
+            str(parent_row["architecture"]),
+            int(parent_row["num_classes"]),
+            str(parent_row["class_mapping_json"]),
+            parent_row["training_dataset_id"],
+            parent_row["test_dataset_id"],
+            _normalize_text(parent_row["description"]),
+            _normalize_text(parent_row["notes"]),
+        ),
+    )
+    version_id = int(cursor.lastrowid)
+    database_connection.execute(
+        """
+        UPDATE model_families
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (int(parent_row["family_id"]),),
+    )
+    return get_model_version_by_id(database_connection, version_id)
+
+
+def build_model_file_path_for_version(
+    family_name: str,
+    version_number: int,
+    original_file_name: str,
+) -> Path:
+    """Return the managed checkpoint path for one version without copying any file."""
+    safe_family_name = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in family_name)
+    destination_directory = MODELS_DIRECTORY / safe_family_name / f"v{version_number}"
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    return (destination_directory / original_file_name).resolve()
 
 
 def _copy_model_to_version_directory(

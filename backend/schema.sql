@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS test_datasets (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS model_families (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -124,6 +130,8 @@ CREATE TABLE IF NOT EXISTS replay_buffer_images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     replay_buffer_run_id INTEGER NOT NULL,
     model_version_id INTEGER,
+    consumed_in_model_version_id INTEGER,
+    consumed_at TEXT,
     run_image_id INTEGER NOT NULL,
     image_id INTEGER NOT NULL,
     displayed_file_name TEXT NOT NULL,
@@ -131,6 +139,7 @@ CREATE TABLE IF NOT EXISTS replay_buffer_images (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (replay_buffer_run_id) REFERENCES replay_buffer_runs(id) ON DELETE CASCADE,
     FOREIGN KEY (model_version_id) REFERENCES model_versions(id) ON DELETE SET NULL,
+    FOREIGN KEY (consumed_in_model_version_id) REFERENCES model_versions(id) ON DELETE SET NULL,
     FOREIGN KEY (run_image_id) REFERENCES run_images(id) ON DELETE CASCADE,
     FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE,
     UNIQUE (replay_buffer_run_id, run_image_id)

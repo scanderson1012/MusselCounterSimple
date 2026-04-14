@@ -48,6 +48,10 @@ BASELINE_MODEL_DESCRIPTION = (
     "This model is meant to detect and classify this specific species. The model cannot be trusted to "
     "accurately detect and classify other mussels species or ages."
 )
+DEFAULT_APP_SETTINGS = {
+    "fine_tune_min_new_images": "10",
+    "fine_tune_num_epochs": "5",
+}
 
 
 def init_db() -> None:
@@ -83,6 +87,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         }
     if replay_buffer_image_columns and "model_version_id" not in replay_buffer_image_columns:
         conn.execute("ALTER TABLE replay_buffer_images ADD COLUMN model_version_id INTEGER")
+    if replay_buffer_image_columns and "consumed_in_model_version_id" not in replay_buffer_image_columns:
+        conn.execute("ALTER TABLE replay_buffer_images ADD COLUMN consumed_in_model_version_id INTEGER")
+    if replay_buffer_image_columns and "consumed_at" not in replay_buffer_image_columns:
+        conn.execute("ALTER TABLE replay_buffer_images ADD COLUMN consumed_at TEXT")
 
     model_version_columns = set()
     if _table_exists(conn, "model_versions"):
@@ -96,6 +104,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)
         _backfill_bundled_baseline_description(conn)
+    _seed_default_app_settings(conn)
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -282,6 +291,18 @@ def _get_or_create_seed_dataset(
         labels_dir=labels_dir,
         description=description,
     )
+
+
+def _seed_default_app_settings(conn: sqlite3.Connection) -> None:
+    for setting_key, setting_value in DEFAULT_APP_SETTINGS.items():
+        conn.execute(
+            """
+            INSERT INTO app_settings (setting_key, setting_value)
+            VALUES (?, ?)
+            ON CONFLICT(setting_key) DO NOTHING
+            """,
+            (setting_key, setting_value),
+        )
 
 
 if __name__ == "__main__":

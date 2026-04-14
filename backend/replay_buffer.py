@@ -79,6 +79,7 @@ def finalize_run_into_replay_buffer(
             SELECT id
             FROM replay_buffer_images
             WHERE model_version_id IS ? AND image_id = ?
+              AND consumed_in_model_version_id IS NULL
             ORDER BY id ASC
             """,
             (model_version_id, int(run_image["image_id"])),
@@ -92,9 +93,11 @@ def finalize_run_into_replay_buffer(
                     run_image_id,
                     image_id,
                     displayed_file_name,
-                    stored_path
+                    stored_path,
+                    consumed_in_model_version_id,
+                    consumed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
                 """,
                 (
                     replay_buffer_run_id,
@@ -117,6 +120,8 @@ def finalize_run_into_replay_buffer(
                     run_image_id = ?,
                     displayed_file_name = ?,
                     stored_path = ?,
+                    consumed_in_model_version_id = NULL,
+                    consumed_at = NULL,
                     created_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
@@ -256,6 +261,7 @@ def list_replay_buffer_counts_by_model(database_connection: sqlite3.Connection) 
                 image_id
             FROM replay_buffer_images
             WHERE model_version_id IS NOT NULL
+              AND consumed_in_model_version_id IS NULL
             GROUP BY model_version_id, image_id
         )
         SELECT
@@ -275,6 +281,192 @@ def list_replay_buffer_counts_by_model(database_connection: sqlite3.Connection) 
         }
         for row in rows
     }
+
+
+def list_pending_replay_buffer_images_for_model(
+    database_connection: sqlite3.Connection,
+    model_version_id: int,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return oldest pending replay-buffer images for one model version."""
+    limit_sql = ""
+    params: list[Any] = [int(model_version_id)]
+    if limit is not None:
+        limit_sql = "LIMIT ?"
+        params.append(max(0, int(limit)))
+    rows = database_connection.execute(
+        f"""
+        WITH canonical_pending_images AS (
+            SELECT
+                MAX(id) AS replay_buffer_image_id
+            FROM replay_buffer_images
+            WHERE model_version_id = ?
+              AND consumed_in_model_version_id IS NULL
+            GROUP BY image_id
+        )
+        SELECT
+            replay_buffer_images.id,
+            replay_buffer_images.replay_buffer_run_id,
+            replay_buffer_images.model_version_id,
+            replay_buffer_images.run_image_id,
+            replay_buffer_images.image_id,
+            replay_buffer_images.displayed_file_name,
+            replay_buffer_images.stored_path,
+            replay_buffer_images.created_at
+        FROM replay_buffer_images
+        JOIN canonical_pending_images
+            ON canonical_pending_images.replay_buffer_image_id = replay_buffer_images.id
+        ORDER BY replay_buffer_images.created_at ASC, replay_buffer_images.id ASC
+        {limit_sql}
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_replay_buffer_detections_for_images(
+    database_connection: sqlite3.Connection,
+    replay_buffer_image_ids: list[int],
+) -> dict[int, list[dict[str, Any]]]:
+    """Return replay-buffer detections grouped by replay-buffer image ID."""
+    if not replay_buffer_image_ids:
+        return {}
+    placeholders = ",".join(["?"] * len(replay_buffer_image_ids))
+    rows = database_connection.execute(
+        f"""
+        SELECT
+            id,
+            replay_buffer_image_id,
+            class_name,
+            bbox_x1,
+            bbox_y1,
+            bbox_x2,
+            bbox_y2,
+            source_detection_id,
+            confidence_score,
+            was_edited,
+            created_at
+        FROM replay_buffer_detections
+        WHERE replay_buffer_image_id IN ({placeholders})
+        ORDER BY replay_buffer_image_id ASC, id ASC
+        """,
+        replay_buffer_image_ids,
+    ).fetchall()
+    grouped_rows: dict[int, list[dict[str, Any]]] = {
+        int(replay_buffer_image_id): []
+        for replay_buffer_image_id in replay_buffer_image_ids
+    }
+    for row in rows:
+        grouped_rows.setdefault(int(row["replay_buffer_image_id"]), []).append(dict(row))
+    return grouped_rows
+
+
+def list_consumed_replay_buffer_images_through_version(
+    database_connection: sqlite3.Connection,
+    family_id: int,
+    max_version_number: int,
+) -> list[dict[str, Any]]:
+    """Return replay-buffer images already consumed by one model lineage."""
+    rows = database_connection.execute(
+        """
+        SELECT
+            replay_buffer_images.id,
+            replay_buffer_images.replay_buffer_run_id,
+            replay_buffer_images.model_version_id,
+            replay_buffer_images.consumed_in_model_version_id,
+            replay_buffer_images.run_image_id,
+            replay_buffer_images.image_id,
+            replay_buffer_images.displayed_file_name,
+            replay_buffer_images.stored_path,
+            replay_buffer_images.created_at
+        FROM replay_buffer_images
+        JOIN model_versions
+            ON model_versions.id = replay_buffer_images.consumed_in_model_version_id
+        WHERE model_versions.family_id = ?
+          AND model_versions.version_number <= ?
+        ORDER BY model_versions.version_number ASC, replay_buffer_images.created_at ASC, replay_buffer_images.id ASC
+        """,
+        (int(family_id), int(max_version_number)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_replay_buffer_images_consumed(
+    database_connection: sqlite3.Connection,
+    replay_buffer_image_ids: list[int],
+    model_version_id: int,
+) -> None:
+    """Mark replay-buffer images as consumed by one new model version."""
+    if not replay_buffer_image_ids:
+        return
+    placeholders = ",".join(["?"] * len(replay_buffer_image_ids))
+    database_connection.execute(
+        f"""
+        UPDATE replay_buffer_images
+        SET
+            consumed_in_model_version_id = ?,
+            consumed_at = CURRENT_TIMESTAMP
+        WHERE id IN ({placeholders})
+        """,
+        [int(model_version_id), *[int(image_id) for image_id in replay_buffer_image_ids]],
+    )
+
+
+def restore_replay_buffer_images_to_model(
+    database_connection: sqlite3.Connection,
+    deleted_version_ids: list[int],
+    restored_model_version_id: int | None,
+) -> None:
+    """Return replay-buffer images from deleted versions to the active pending buffer."""
+    if not deleted_version_ids:
+        return
+    placeholders = ",".join(["?"] * len(deleted_version_ids))
+    deleted_id_params = [int(version_id) for version_id in deleted_version_ids]
+    if restored_model_version_id is None:
+        database_connection.execute(
+            f"""
+            UPDATE replay_buffer_images
+            SET
+                model_version_id = NULL,
+                consumed_in_model_version_id = NULL,
+                consumed_at = NULL
+            WHERE model_version_id IN ({placeholders})
+               OR consumed_in_model_version_id IN ({placeholders})
+            """,
+            [*deleted_id_params, *deleted_id_params],
+        )
+        return
+
+    database_connection.execute(
+        f"""
+        UPDATE replay_buffer_images
+        SET
+            model_version_id = ?,
+            consumed_in_model_version_id = NULL,
+            consumed_at = NULL
+        WHERE model_version_id IN ({placeholders})
+           OR consumed_in_model_version_id IN ({placeholders})
+        """,
+        [int(restored_model_version_id), *deleted_id_params, *deleted_id_params],
+    )
+
+
+def is_run_image_locked_for_editing(
+    database_connection: sqlite3.Connection,
+    run_image_id: int,
+) -> bool:
+    """Return whether one run image has already been consumed into fine-tuning."""
+    row = database_connection.execute(
+        """
+        SELECT 1
+        FROM replay_buffer_images
+        WHERE run_image_id = ?
+          AND consumed_in_model_version_id IS NOT NULL
+        LIMIT 1
+        """,
+        (int(run_image_id),),
+    ).fetchone()
+    return row is not None
 
 
 def _delete_run_owned_replay_entries(

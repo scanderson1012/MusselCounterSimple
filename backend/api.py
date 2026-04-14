@@ -23,26 +23,36 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 
+from backend.app_settings import get_app_settings
+from backend.app_settings import update_app_settings
+from backend.database import build_model_file_path_for_version
 from backend.database import get_database_connection
 from backend.database import create_dataset_record
 from backend.database import create_detection_for_run_image
 from backend.database import delete_model_family
 from backend.database import delete_model_version
 from backend.database import finalize_run_into_replay_buffer
+from backend.database import get_next_version_number_for_family
 from backend.database import get_or_create_dataset_record
 from backend.database import get_image_file_metadata_from_database
 from backend.database import get_model_version_by_id
+from backend.database import get_replay_buffer_detections_for_images
 from backend.database import get_run_info_from_detection_id
 from backend.database import get_run_from_database
+from backend.database import is_run_image_locked_for_editing
+from backend.database import list_consumed_replay_buffer_images_through_version
 from backend.database import list_model_options
 from backend.database import list_model_registry
+from backend.database import list_pending_replay_buffer_images_for_model
 from backend.database import list_runs_from_database
 from backend.database import list_test_datasets
 from backend.database import list_training_datasets
+from backend.database import mark_replay_buffer_images_consumed
 from backend.database import recalculate_run_image_mussel_counts_from_detections
 from backend.database import recalculate_run_mussel_counts_from_detections
 from backend.database import remove_replay_buffer_entry_for_run_image
 from backend.database import register_baseline_model
+from backend.database import register_finetuned_model_version
 from backend.database import run_exists
 from backend.database import unlink_image_from_run
 from backend.database import update_detection_fields
@@ -55,7 +65,10 @@ from backend.predict_service import PredictServiceInput
 from backend.predict_service import execute_predict_request
 from backend.model_evaluation import evaluate_model_file
 from backend.model_evaluation import store_model_evaluation
+from backend.model_finetuning import FineTuneConfig
+from backend.model_finetuning import run_fine_tuning
 from backend.model_jobs import complete_model_job
+from backend.model_jobs import cancel_model_job
 from backend.model_jobs import create_model_job
 from backend.model_jobs import fail_model_job
 from backend.model_jobs import get_model_job
@@ -138,6 +151,13 @@ class ModelEvaluateRequest(BaseModel):
     score_threshold: float = 0.5
 
 
+class AppSettingsUpdateRequest(BaseModel):
+    """Supported application settings for the desktop app."""
+
+    fine_tune_min_new_images: int
+    fine_tune_num_epochs: int
+
+
 def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_version_id: int) -> None:
     """Background worker for evaluating one stored model version on its assigned test set."""
     try:
@@ -192,6 +212,111 @@ def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_versio
             evaluation=evaluation,
         )
     except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
+        if "cancelled by user" in str(error).lower():
+            cancel_model_job(model_job_id, "Evaluation cancelled")
+            return
+        fail_model_job(model_job_id, str(error))
+
+
+def _fine_tune_latest_model_version(model_job_id: str, model_version_id: int) -> None:
+    """Background worker for fine-tuning the latest version in one family."""
+    try:
+        with get_database_connection() as database_connection:
+            settings = get_app_settings(database_connection)
+            version = get_model_version_by_id(database_connection, model_version_id)
+            if version is None:
+                raise ValueError("Model version not found")
+            if not bool(version.get("is_latest_version")):
+                raise ValueError("Only the newest version in a model family can be fine-tuned.")
+            if version.get("training_images_dir") in (None, "") or version.get("training_labels_dir") in (None, ""):
+                raise ValueError("This model version does not have a valid training dataset.")
+
+            pending_limit = int(settings["fine_tune_min_new_images"])
+            pending_replay_images = list_pending_replay_buffer_images_for_model(
+                database_connection=database_connection,
+                model_version_id=int(version["id"]),
+                limit=pending_limit,
+            )
+            if len(pending_replay_images) < pending_limit:
+                raise ValueError(
+                    f"Fine-tuning requires {pending_limit} new replay-buffer images for this model."
+                )
+
+            replay_history_images = list_consumed_replay_buffer_images_through_version(
+                database_connection=database_connection,
+                family_id=int(version["family_id"]),
+                max_version_number=int(version["version_number"]),
+            )
+            replay_history_detections = get_replay_buffer_detections_for_images(
+                database_connection=database_connection,
+                replay_buffer_image_ids=[int(row["id"]) for row in replay_history_images],
+            )
+            new_replay_detections = get_replay_buffer_detections_for_images(
+                database_connection=database_connection,
+                replay_buffer_image_ids=[int(row["id"]) for row in pending_replay_images],
+            )
+            next_version_number = get_next_version_number_for_family(
+                database_connection,
+                int(version["family_id"]),
+            )
+            output_model_path = build_model_file_path_for_version(
+                family_name=str(version["family_name"]),
+                version_number=int(next_version_number),
+                original_file_name=str(version["original_file_name"]),
+            )
+
+        fine_tune_result = run_fine_tuning(
+            FineTuneConfig(
+                parent_model_path=str(version["model_file_name"]),
+                output_model_path=str(output_model_path),
+                architecture=str(version["architecture"]),
+                num_classes=int(version["num_classes"]),
+                class_mapping=dict(version["class_mapping"]),
+                base_train_images_dir=str(version["training_images_dir"]),
+                base_train_labels_dir=str(version["training_labels_dir"]),
+                replay_history_images=replay_history_images,
+                replay_history_detections=replay_history_detections,
+                new_replay_images=pending_replay_images,
+                new_replay_detections=new_replay_detections,
+                num_epochs=int(settings["fine_tune_num_epochs"]),
+            ),
+            progress_callback=lambda processed, total: update_model_job_progress(
+                model_job_id, processed, total
+            ),
+            stage_callback=lambda stage: update_model_job_stage(model_job_id, stage),
+            should_cancel_callback=lambda: is_model_job_cancel_requested(model_job_id),
+        )
+        if is_model_job_cancel_requested(model_job_id):
+            raise RuntimeError("Fine-tuning cancelled by user.")
+
+        with get_database_connection() as database_connection:
+            new_version = register_finetuned_model_version(
+                database_connection=database_connection,
+                parent_version_id=int(version["id"]),
+                model_file_path=str(output_model_path),
+            )
+            mark_replay_buffer_images_consumed(
+                database_connection=database_connection,
+                replay_buffer_image_ids=[int(row["id"]) for row in pending_replay_images],
+                model_version_id=int(new_version["id"]),
+            )
+            database_connection.commit()
+            refreshed_version = get_model_version_by_id(database_connection, int(new_version["id"]))
+            if refreshed_version is None:
+                raise RuntimeError("Failed to reload the fine-tuned model version.")
+
+        complete_model_job(
+            model_job_id=model_job_id,
+            model_version=refreshed_version,
+            fine_tune_result=fine_tune_result,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError, sqlite3.IntegrityError) as error:
+        if "cancelled by user" in str(error).lower():
+            output_model_path = fine_tune_result["output_model_path"] if "fine_tune_result" in locals() and fine_tune_result else None
+            if output_model_path:
+                Path(output_model_path).expanduser().resolve().unlink(missing_ok=True)
+            cancel_model_job(model_job_id, "Fine-tuning cancelled")
+            return
         fail_model_job(model_job_id, str(error))
 
 
@@ -268,6 +393,11 @@ def edit_detection_in_database(detection_id: int, request: DetectionPatchRequest
         run_information = get_run_info_from_detection_id(database_connection, detection_id)
         if run_information is None:
             raise HTTPException(status_code=404, detail="Detection not found")
+        if is_run_image_locked_for_editing(database_connection, int(run_information["run_image_id"])):
+            raise HTTPException(
+                status_code=400,
+                detail="This image has already been used for fine-tuning and can no longer be edited.",
+            )
 
         if "is_deleted" in fields_to_update:
             fields_to_update["is_deleted"] = 1 if fields_to_update["is_deleted"] else 0
@@ -295,6 +425,11 @@ def remove_image_from_run(run_id: int, run_image_id: int) -> dict[str, Any]:
     with get_database_connection() as database_connection:
         if not run_exists(database_connection, run_id):
             raise HTTPException(status_code=404, detail="Run not found")
+        if is_run_image_locked_for_editing(database_connection, int(run_image_id)):
+            raise HTTPException(
+                status_code=400,
+                detail="This image has already been used for fine-tuning and can no longer be removed.",
+            )
 
         remove_replay_buffer_entry_for_run_image(database_connection, run_image_id)
         deleted = unlink_image_from_run(database_connection, run_id, run_image_id)
@@ -329,6 +464,11 @@ def create_detection_for_image(run_image_id: int, request: DetectionCreateReques
         ).fetchone()
         if run_information is None:
             raise HTTPException(status_code=404, detail="Run image not found")
+        if is_run_image_locked_for_editing(database_connection, int(run_image_id)):
+            raise HTTPException(
+                status_code=400,
+                detail="This image has already been used for fine-tuning and can no longer be edited.",
+            )
 
         try:
             create_detection_for_run_image(
@@ -364,6 +504,14 @@ def finalize_reviewed_run(run_id: int) -> dict[str, Any]:
     with get_database_connection() as database_connection:
         if not run_exists(database_connection, run_id):
             raise HTTPException(status_code=404, detail="Run not found")
+        run_data = get_run_from_database(database_connection, run_id)
+        if run_data is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run_data.get("model_version_id") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="This run is not linked to a registered model version, so it cannot be finalized into the replay buffer.",
+            )
 
         try:
             replay_buffer_summary = finalize_run_into_replay_buffer(database_connection, run_id)
@@ -411,6 +559,25 @@ def list_models_registry() -> dict[str, Any]:
     """Return model families, versions, and their latest evaluation."""
     with get_database_connection() as database_connection:
         return {"families": list_model_registry(database_connection)}
+
+
+@router.get("/settings")
+def get_settings() -> dict[str, Any]:
+    """Return persisted application settings."""
+    with get_database_connection() as database_connection:
+        return {"settings": get_app_settings(database_connection)}
+
+
+@router.patch("/settings")
+def patch_settings(request: AppSettingsUpdateRequest) -> dict[str, Any]:
+    """Update persisted application settings."""
+    with get_database_connection() as database_connection:
+        settings = update_app_settings(
+            database_connection,
+            request.model_dump(),
+        )
+        database_connection.commit()
+        return {"settings": settings}
 
 
 @router.get("/datasets/training")
@@ -607,6 +774,50 @@ def evaluate_registered_model_on_assigned_test_set(model_version_id: int) -> dic
 
         worker = Thread(
             target=_evaluate_model_version_on_assigned_test_set,
+            args=(str(model_job["model_job_id"]), int(model_version_id)),
+            daemon=True,
+        )
+        worker.start()
+        return model_job
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/models/versions/{model_version_id}/fine-tune")
+def fine_tune_registered_model_version(model_version_id: int) -> dict[str, Any]:
+    """Fine-tune the latest model version using pending replay-buffer images."""
+    try:
+        with get_database_connection() as database_connection:
+            settings = get_app_settings(database_connection)
+            model_version = get_model_version_by_id(database_connection, model_version_id)
+            if model_version is None:
+                raise HTTPException(status_code=404, detail="Model version not found")
+            if not bool(model_version.get("is_latest_version")):
+                raise HTTPException(status_code=400, detail="Only the newest version in a model family can be fine-tuned.")
+
+            pending_image_count = len(
+                list_pending_replay_buffer_images_for_model(
+                    database_connection=database_connection,
+                    model_version_id=model_version_id,
+                )
+            )
+            required_image_count = int(settings["fine_tune_min_new_images"])
+            if pending_image_count < required_image_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Fine-tuning is not available yet. "
+                        f"{required_image_count} new replay-buffer images are required, and only {pending_image_count} are ready."
+                    ),
+                )
+
+            display_name = f"{model_version.get('family_name', 'model')} {model_version.get('version_tag', '')}".strip()
+            model_job = create_model_job(display_name=display_name, job_type="fine_tuning")
+
+        worker = Thread(
+            target=_fine_tune_latest_model_version,
             args=(str(model_job["model_job_id"]), int(model_version_id)),
             daemon=True,
         )

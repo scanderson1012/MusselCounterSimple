@@ -1,7 +1,7 @@
 /**
  * Main app navigation and top-level actions.
  */
-function TopBar({ onGoHome, onGoHistory, onGoModels, onAddModel, onStartNewRun }) {
+function TopBar({ onGoHome, onGoHistory, onGoModels, onGoSettings, onAddModel, onStartNewRun }) {
   return (
     <header className="topbar">
       <nav className="topbar-actions-left">
@@ -13,6 +13,9 @@ function TopBar({ onGoHome, onGoHistory, onGoModels, onAddModel, onStartNewRun }
         </button>
         <button id="go-models" className="ghost topbar-chip" onClick={onGoModels}>
           Models
+        </button>
+        <button id="go-settings" className="ghost topbar-chip" onClick={onGoSettings}>
+          Settings
         </button>
       </nav>
       <nav className="topbar-actions-right">
