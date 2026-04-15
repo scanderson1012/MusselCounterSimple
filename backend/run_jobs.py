@@ -73,6 +73,7 @@ def create_run_job(
         "run_id": run_id,
         "processed_images": 0,
         "total_images": int(total_images),
+        "estimated_remaining_seconds": None,
         "skipped_images": list(skipped_images),
         "skipped_image_ids": list(skipped_image_ids),
         "invalid_image_ids": list(invalid_image_ids),
@@ -123,8 +124,19 @@ def update_run_job_progress(
         if bounded_total_images > 0:
             bounded_processed_images = min(bounded_processed_images, bounded_total_images)
 
+        created_at = datetime.fromisoformat(str(_RUN_JOB_DATA["created_at"]))
+        elapsed_seconds = max((datetime.now(timezone.utc) - created_at).total_seconds(), 0.0)
+        estimated_remaining_seconds = None
+        if bounded_processed_images > 0 and bounded_total_images > bounded_processed_images:
+            seconds_per_image = elapsed_seconds / bounded_processed_images
+            estimated_remaining_seconds = max(
+                0,
+                int(round(seconds_per_image * (bounded_total_images - bounded_processed_images))),
+            )
+
         _RUN_JOB_DATA["processed_images"] = bounded_processed_images
         _RUN_JOB_DATA["total_images"] = bounded_total_images
+        _RUN_JOB_DATA["estimated_remaining_seconds"] = estimated_remaining_seconds
         _RUN_JOB_DATA["updated_at"] = curr_time_in_iso()
 
 
@@ -141,6 +153,7 @@ def complete_run_job(run_job_id: str, run_data: dict[str, Any]) -> None:
         _RUN_JOB_DATA["processed_images"] = int(
             _RUN_JOB_DATA["total_images"]
         )
+        _RUN_JOB_DATA["estimated_remaining_seconds"] = 0
         _RUN_JOB_DATA["run"] = deepcopy(run_data)
         _RUN_JOB_DATA["updated_at"] = curr_time_in_iso()
 
@@ -155,4 +168,5 @@ def fail_run_job(run_job_id: str, error_message: str) -> None:
 
         _RUN_JOB_DATA["status"] = "failed"
         _RUN_JOB_DATA["error_message"] = error_message
+        _RUN_JOB_DATA["estimated_remaining_seconds"] = None
         _RUN_JOB_DATA["updated_at"] = curr_time_in_iso()

@@ -103,11 +103,12 @@ function ModelsView({
                 );
               })()}
 
-              <div className="model-version-list">
-                {family.versions.map((version) => {
-                  const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
-                  return (
-                    <div key={version.id} className="model-version-row">
+                <div className="model-version-list">
+                  {family.versions.map((version) => {
+                    const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
+                    const canDeleteVersion = !isBaselineFamily || Number(version.version_number || 0) > 1;
+                    return (
+                      <div key={version.id} className="model-version-row">
                       <div className="model-version-main">
                         <p className="model-version-title">
                           {family.name} {version.version_tag}
@@ -132,7 +133,7 @@ function ModelsView({
                         <button className="ghost" onClick={() => onExportModelVersion({ ...version, family_name: family.name })}>
                           Export
                         </button>
-                        {!isBaselineFamily ? (
+                        {canDeleteVersion ? (
                           <button className="ghost" onClick={() => onDeleteModelVersion({ ...version, family_name: family.name })}>
                             Delete Version
                           </button>

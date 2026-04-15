@@ -484,8 +484,8 @@ def delete_model_version(
     ).fetchone()
     if row is None:
         return False
-    if _is_protected_baseline_family(str(row["family_name"])):
-        raise ValueError("The bundled baseline model cannot be deleted.")
+    if _is_protected_baseline_family(str(row["family_name"])) and int(row["version_number"]) <= 1:
+        raise ValueError("The bundled baseline model v1 cannot be deleted.")
 
     rows_to_delete = database_connection.execute(
         """

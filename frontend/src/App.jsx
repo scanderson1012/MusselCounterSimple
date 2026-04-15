@@ -214,6 +214,7 @@ function App() {
         ...previousValue,
         processedImages: Number(runJobData.processed_images) || 0,
         totalImages: Number(runJobData.total_images) || 0,
+        estimatedRemainingSeconds: runJobData.estimated_remaining_seconds,
       }));
 
       if (runJobData.status === "completed") {
@@ -731,8 +732,8 @@ function App() {
   const onDeleteModelVersion = useCallback(async (version) => {
     const versionNumber = Number(version.version_number || 0);
     const isBaselineFamily = String(version.family_name || "").toLowerCase() === "fasterrcnn_baseline";
-    if (isBaselineFamily) {
-      showStatus("The bundled baseline model cannot be deleted.", "error");
+    if (isBaselineFamily && versionNumber <= 1) {
+      showStatus("The bundled baseline model v1 cannot be deleted.", "error");
       return;
     }
     const confirmed = window.confirm(
