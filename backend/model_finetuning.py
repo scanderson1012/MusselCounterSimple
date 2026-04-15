@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import Subset
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
+from backend.compute import resolve_torch_device
 from backend.model_execution import _SUPPORTED_ARCHS
 
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
@@ -134,6 +135,7 @@ class ReplayBufferSnapshotDataset(Dataset):
 
 def run_fine_tuning(
     config: FineTuneConfig,
+    preferred_compute_mode: str = "automatic",
     progress_callback=None,
     stage_callback=None,
     should_cancel_callback=None,
@@ -195,6 +197,7 @@ def run_fine_tuning(
         model_path=config.parent_model_path,
         architecture=config.architecture,
         num_classes=config.num_classes,
+        preferred_compute_mode=preferred_compute_mode,
     )
     trainable_parameters = _configure_trainable_parameters(model, config.freeze_backbone)
     optimizer = torch.optim.AdamW(
@@ -300,12 +303,17 @@ def _validate_fine_tune_inputs(config: FineTuneConfig) -> None:
         raise FileNotFoundError(f"Training labels directory not found: {base_train_labels_dir}")
 
 
-def _load_detection_model(model_path: str, architecture: str, num_classes: int) -> tuple[torch.nn.Module, torch.device]:
+def _load_detection_model(
+    model_path: str,
+    architecture: str,
+    num_classes: int,
+    preferred_compute_mode: str,
+) -> tuple[torch.nn.Module, torch.device]:
     builder = _SUPPORTED_ARCHS.get(architecture)
     if builder is None:
         raise ValueError(f"Unsupported architecture for fine-tuning: {architecture}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_torch_device(preferred_compute_mode)
     checkpoint = torch.load(str(Path(model_path).expanduser().resolve()), map_location=device)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]

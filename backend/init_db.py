@@ -51,6 +51,8 @@ BASELINE_MODEL_DESCRIPTION = (
 DEFAULT_APP_SETTINGS = {
     "fine_tune_min_new_images": "10",
     "fine_tune_num_epochs": "5",
+    "compute_mode": "automatic",
+    "gpu_upgrade_prompt_seen": "0",
 }
 
 

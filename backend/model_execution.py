@@ -18,6 +18,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
+from backend.compute import resolve_torch_device
+
 # Maps RCNN class IDs to app labels used by detections/counts.
 # Background class (0) is intentionally excluded.
 RCNN_LABELS = {
@@ -41,9 +43,9 @@ MODEL_CONFIG: dict[str, Any] = {
 }
 
 # Cache key: absolute model path.
-# Cache value: (file modified_time, loaded_model, device).
+# Cache value: (file modified_time, device_type, loaded_model, device).
 # Caches loaded model so app doesn't reload weights from disk for every run.
-MODEL_CACHE: dict[str, tuple[float, Any, Any]] = {}
+MODEL_CACHE: dict[str, tuple[float, str, Any, Any]] = {}
 
 
 def _model_file_name_to_absolute_path(model_file_name: str) -> Path:
@@ -80,7 +82,12 @@ def _build_model(config: dict[str, Any]) -> Any:
     return builder(weights=None, weights_backbone=None, num_classes=num_classes)
 
 
-def _load_model(model_path: Path) -> tuple[Any, Any]:
+def clear_model_cache() -> None:
+    """Clear cached loaded models so future calls respect current device preference."""
+    MODEL_CACHE.clear()
+
+
+def _load_model(model_path: Path, preferred_compute_mode: str) -> tuple[Any, Any]:
     """Load RCNN weights from disk and return `(model, device)`.
 
     Supported checkpoint layouts:
@@ -89,7 +96,7 @@ def _load_model(model_path: Path) -> tuple[Any, Any]:
     - Dict containing `state_dict`
     """
     # Pick GPU when available; otherwise run on CPU.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_torch_device(preferred_compute_mode)
 
     # Load checkpoint on the target device.
     checkpoint = torch.load(str(model_path), map_location=device)
@@ -124,7 +131,7 @@ def _load_model(model_path: Path) -> tuple[Any, Any]:
     return model, device
 
 
-def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
+def _get_model_device(model_file_name: str, preferred_compute_mode: str) -> tuple[Any, Any]:
     """Return cached `(model, device)` and reload only when model file changed.
 
     The cache invalidates using file modified-time (`st_mtime`).
@@ -134,13 +141,14 @@ def _get_model_device(model_file_name: str) -> tuple[Any, Any]:
     model_path = _model_file_name_to_absolute_path(model_file_name)
     cache_key = str(model_path)
     modified_time = model_path.stat().st_mtime
+    current_device_type = resolve_torch_device(preferred_compute_mode).type
 
     cached = MODEL_CACHE.get(cache_key)
-    if cached is not None and cached[0] == modified_time:
-        return cached[1], cached[2]
+    if cached is not None and cached[0] == modified_time and cached[1] == current_device_type:
+        return cached[2], cached[3]
 
-    model, device = _load_model(model_path)
-    MODEL_CACHE[cache_key] = (modified_time, model, device)
+    model, device = _load_model(model_path, preferred_compute_mode)
+    MODEL_CACHE[cache_key] = (modified_time, current_device_type, model, device)
     return model, device
 
 
@@ -196,6 +204,7 @@ def run_rcnn_model_execution_for_run_images(
     run_image_ids: list[int],
     model_file_name: str,
     threshold_score: float,
+    preferred_compute_mode: str,
     on_run_image_processed: Callable[[int, int], None] | None = None,
 ) -> None:
     """Run model_execution for selected `run_images` rows and write results to DB.
@@ -211,7 +220,7 @@ def run_rcnn_model_execution_for_run_images(
     if not run_image_ids:
         return
 
-    model_device_tuple = _get_model_device(model_file_name)
+    model_device_tuple = _get_model_device(model_file_name, preferred_compute_mode)
     placeholders = ",".join(["?"] * len(run_image_ids))
     # Pull run-image rows with physical file path for model_execution.
     run_images_from_database = database_connection.execute(

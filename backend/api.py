@@ -25,6 +25,7 @@ from pydantic import Field
 
 from backend.app_settings import get_app_settings
 from backend.app_settings import update_app_settings
+from backend.compute import get_compute_status
 from backend.database import build_model_file_path_for_version
 from backend.database import get_database_connection
 from backend.database import create_dataset_record
@@ -65,6 +66,7 @@ from backend.predict_service import PredictServiceInput
 from backend.predict_service import execute_predict_request
 from backend.model_evaluation import evaluate_model_file
 from backend.model_evaluation import store_model_evaluation
+from backend.model_execution import clear_model_cache
 from backend.model_finetuning import FineTuneConfig
 from backend.model_finetuning import run_fine_tuning
 from backend.model_jobs import complete_model_job
@@ -154,8 +156,10 @@ class ModelEvaluateRequest(BaseModel):
 class AppSettingsUpdateRequest(BaseModel):
     """Supported application settings for the desktop app."""
 
-    fine_tune_min_new_images: int
-    fine_tune_num_epochs: int
+    fine_tune_min_new_images: int | None = None
+    fine_tune_num_epochs: int | None = None
+    compute_mode: str | None = None
+    gpu_upgrade_prompt_seen: bool | None = None
 
 
 def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_version_id: int) -> None:
@@ -182,12 +186,14 @@ def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_versio
             )
             if test_dataset is None:
                 raise ValueError(f"Test dataset not found: {version['test_dataset_id']}")
+            settings = get_app_settings(database_connection)
 
             evaluation_result = evaluate_model_file(
                 model_file_name=str(version["model_file_name"]),
                 images_dir=str(test_dataset["images_dir"]),
                 labels_dir=str(test_dataset["labels_dir"]),
                 class_mapping=dict(version["class_mapping"]),
+                preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
                 progress_callback=lambda processed, total: update_model_job_progress(
                     model_job_id, processed, total
                 ),
@@ -280,6 +286,7 @@ def _fine_tune_latest_model_version(model_job_id: str, model_version_id: int) ->
                 new_replay_detections=new_replay_detections,
                 num_epochs=int(settings["fine_tune_num_epochs"]),
             ),
+            preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
             progress_callback=lambda processed, total: update_model_job_progress(
                 model_job_id, processed, total
             ),
@@ -568,16 +575,27 @@ def get_settings() -> dict[str, Any]:
         return {"settings": get_app_settings(database_connection)}
 
 
+@router.get("/compute/status")
+def get_compute_mode_status() -> dict[str, Any]:
+    """Return hardware detection and current compute-mode status."""
+    with get_database_connection() as database_connection:
+        settings = get_app_settings(database_connection)
+    return {"compute_status": get_compute_status(str(settings.get("compute_mode", "automatic"))).to_dict()}
+
+
 @router.patch("/settings")
 def patch_settings(request: AppSettingsUpdateRequest) -> dict[str, Any]:
     """Update persisted application settings."""
     with get_database_connection() as database_connection:
+        previous_settings = get_app_settings(database_connection)
         settings = update_app_settings(
             database_connection,
-            request.model_dump(),
+            request.model_dump(exclude_none=True),
         )
         database_connection.commit()
-        return {"settings": settings}
+    if previous_settings.get("compute_mode") != settings.get("compute_mode"):
+        clear_model_cache()
+    return {"settings": settings}
 
 
 @router.get("/datasets/training")
@@ -726,12 +744,14 @@ def evaluate_registered_model(model_version_id: int, request: ModelEvaluateReque
             if test_dataset is None:
                 raise HTTPException(status_code=404, detail="Test dataset not found")
 
+            settings = get_app_settings(database_connection)
             evaluation_result = evaluate_model_file(
                 model_file_name=str(model_version["model_file_name"]),
                 images_dir=str(test_dataset["images_dir"]),
                 labels_dir=str(test_dataset["labels_dir"]),
                 class_mapping=dict(model_version["class_mapping"]),
                 score_threshold=float(request.score_threshold),
+                preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
             )
             evaluation = store_model_evaluation(
                 database_connection=database_connection,

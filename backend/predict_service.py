@@ -17,6 +17,7 @@ from backend.database import get_model_file_name_for_run
 from backend.database import get_model_name_from_run_id
 from backend.database import get_model_version_id_from_run_id
 from backend.database import get_run_from_database
+from backend.app_settings import get_app_settings
 from backend.database import link_image_to_run
 from backend.database import list_run_image_ids
 from backend.database import run_exists
@@ -65,11 +66,13 @@ def _start_model_execution_in_background(
     """Run model_execution for one run job and finalize its status."""
     try:
         with get_database_connection() as database_connection:
+            settings = get_app_settings(database_connection)
             run_rcnn_model_execution_for_run_images(
                 database_connection=database_connection,
                 run_image_ids=run_image_ids_to_process,
                 model_file_name=requested_model,
                 threshold_score=threshold_score,
+                preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
                 on_run_image_processed=lambda processed_images, total_images: update_run_job_progress(
                     run_job_id,
                     processed_images,

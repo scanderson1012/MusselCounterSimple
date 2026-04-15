@@ -1123,6 +1123,11 @@ input[type="range"] {
   padding: 22px 24px;
 }
 
+.settings-stack {
+  display: grid;
+  gap: 18px;
+}
+
 .settings-panel-header {
   display: flex;
   align-items: flex-start;
@@ -1141,6 +1146,26 @@ input[type="range"] {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.settings-compute-summary {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--panel-soft);
+}
+
+.settings-compute-line {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.gpu-upgrade-modal {
+  width: min(560px, calc(100vw - 32px));
 }
 
 .usage-section-grid {

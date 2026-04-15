@@ -72,6 +72,7 @@ def evaluate_model_file(
     labels_dir: str,
     class_mapping: dict[str, str],
     score_threshold: float = 0.5,
+    preferred_compute_mode: str = "automatic",
     progress_callback=None,
     stage_callback=None,
     should_cancel_callback=None,
@@ -87,7 +88,7 @@ def evaluate_model_file(
         stage_callback("Loading model and preparing evaluation")
 
     loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=_collate_fn)
-    model, device = _get_model_device(model_file_name)
+    model, device = _get_model_device(model_file_name, preferred_compute_mode)
     try:
         mean_average_precision = MeanAveragePrecision(
             box_format="xyxy",

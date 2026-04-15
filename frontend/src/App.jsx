@@ -55,12 +55,17 @@ function App() {
   const [appSettings, setAppSettings] = useState({
     fine_tune_min_new_images: 10,
     fine_tune_num_epochs: 5,
+    compute_mode: "automatic",
+    gpu_upgrade_prompt_seen: false,
   });
   const [draftAppSettings, setDraftAppSettings] = useState({
     fine_tune_min_new_images: "10",
     fine_tune_num_epochs: "5",
+    compute_mode: "automatic",
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [computeStatus, setComputeStatus] = useState(null);
+  const [isGpuUpgradePromptOpen, setIsGpuUpgradePromptOpen] = useState(false);
   const [modelRegistrationForm, setModelRegistrationForm] = useState({
     source_model_path: "",
     selected_model_file_name: "",
@@ -169,13 +174,23 @@ function App() {
     const normalizedSettings = {
       fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || 10,
       fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || 5,
+      compute_mode: nextSettings.compute_mode || "automatic",
+      gpu_upgrade_prompt_seen: Boolean(nextSettings.gpu_upgrade_prompt_seen),
     };
     setAppSettings(normalizedSettings);
     setDraftAppSettings({
       fine_tune_min_new_images: String(normalizedSettings.fine_tune_min_new_images),
       fine_tune_num_epochs: String(normalizedSettings.fine_tune_num_epochs),
+      compute_mode: normalizedSettings.compute_mode,
     });
     return normalizedSettings;
+  }, [apiGet]);
+
+  const loadComputeStatus = useCallback(async () => {
+    const response = await apiGet("/compute/status");
+    const nextComputeStatus = response.compute_status || null;
+    setComputeStatus(nextComputeStatus);
+    return nextComputeStatus;
   }, [apiGet]);
 
   const loadRun = useCallback(async (runId) => {
@@ -282,13 +297,22 @@ function App() {
 
         setApiBaseUrl(backendBaseUrl);
         await waitForBackend();
-        const [nextModels] = await Promise.all([
+        const [
+          nextModels,
+          _nextFamilies,
+          _nextTrainingDatasets,
+          _nextTestDatasets,
+          _nextRuns,
+          nextSettings,
+          nextComputeStatus,
+        ] = await Promise.all([
           loadModels(),
           loadModelRegistry(),
           loadTrainingDatasets(),
           loadTestDatasets(),
           loadRuns(),
           loadSettings(),
+          loadComputeStatus(),
         ]);
 
         if (isMounted && nextModels.length > 0) {
@@ -297,6 +321,14 @@ function App() {
             return hasPreviousSelection ? previousValue : String(nextModels[0].id);
           });
           showStatus("Ready.", "info");
+        }
+        if (
+          isMounted &&
+          nextSettings &&
+          !nextSettings.gpu_upgrade_prompt_seen &&
+          nextComputeStatus?.compatible_gpu_detected
+        ) {
+          setIsGpuUpgradePromptOpen(true);
         }
       } catch (error) {
         if (isMounted) {
@@ -309,7 +341,7 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, [loadModelRegistry, loadModels, loadRuns, loadSettings, loadTestDatasets, loadTrainingDatasets, showStatus, waitForBackend]);
+  }, [loadComputeStatus, loadModelRegistry, loadModels, loadRuns, loadSettings, loadTestDatasets, loadTrainingDatasets, showStatus, waitForBackend]);
 
   useEffect(() => {
     if (models.length === 0) {
@@ -520,23 +552,74 @@ function App() {
     setDraftAppSettings((previousValue) => ({ ...previousValue, [fieldName]: value }));
   }, []);
 
+  const updateComputePreference = useCallback(async (nextComputeMode, promptSeen) => {
+    const response = await apiPatch("/settings", {
+      compute_mode: nextComputeMode,
+      gpu_upgrade_prompt_seen: promptSeen,
+    });
+    const nextSettings = response.settings || {};
+    setAppSettings((previousValue) => ({
+      ...previousValue,
+      compute_mode: nextSettings.compute_mode || nextComputeMode,
+      gpu_upgrade_prompt_seen: Boolean(nextSettings.gpu_upgrade_prompt_seen),
+    }));
+    setDraftAppSettings((previousValue) => ({
+      ...previousValue,
+      compute_mode: nextSettings.compute_mode || nextComputeMode,
+    }));
+    return loadComputeStatus();
+  }, [apiPatch, loadComputeStatus]);
+
+  const onEnableGpuPreference = useCallback(async () => {
+    try {
+      const nextComputeStatus = await updateComputePreference("gpu_if_available", true);
+      setIsGpuUpgradePromptOpen(false);
+      if (nextComputeStatus?.gpu_runtime_ready) {
+        showStatus("GPU preference enabled. The app will use the GPU when possible.", "info");
+      } else {
+        showStatus(
+          "GPU preference saved. This app build will continue on CPU until optional GPU runtime support is installed.",
+          "info",
+        );
+      }
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [showErrorStatus, showStatus, updateComputePreference]);
+
+  const onKeepCpuForNow = useCallback(async () => {
+    try {
+      await updateComputePreference(appSettings.compute_mode || "automatic", true);
+      setIsGpuUpgradePromptOpen(false);
+      showStatus("The app will stay on CPU for now. You can change this later in Settings.", "info");
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [appSettings.compute_mode, showErrorStatus, showStatus, updateComputePreference]);
+
   const onSaveSettings = useCallback(async () => {
     try {
       setIsSavingSettings(true);
       const payload = {
         fine_tune_min_new_images: Math.max(1, Number(draftAppSettings.fine_tune_min_new_images) || 1),
         fine_tune_num_epochs: Math.max(1, Number(draftAppSettings.fine_tune_num_epochs) || 1),
+        compute_mode: draftAppSettings.compute_mode || "automatic",
+        gpu_upgrade_prompt_seen: Boolean(appSettings.gpu_upgrade_prompt_seen),
       };
       const response = await apiPatch("/settings", payload);
       const nextSettings = response.settings || payload;
       setAppSettings({
         fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || payload.fine_tune_min_new_images,
         fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || payload.fine_tune_num_epochs,
+        compute_mode: nextSettings.compute_mode || payload.compute_mode,
+        gpu_upgrade_prompt_seen: Boolean(nextSettings.gpu_upgrade_prompt_seen),
       });
       setDraftAppSettings({
         fine_tune_min_new_images: String(nextSettings.fine_tune_min_new_images || payload.fine_tune_min_new_images),
         fine_tune_num_epochs: String(nextSettings.fine_tune_num_epochs || payload.fine_tune_num_epochs),
+        compute_mode: nextSettings.compute_mode || payload.compute_mode,
       });
+      await loadComputeStatus();
       showStatus("Settings saved.", "info");
       await loadModelRegistry();
     } catch (error) {
@@ -544,7 +627,7 @@ function App() {
     } finally {
       setIsSavingSettings(false);
     }
-  }, [apiPatch, draftAppSettings, loadModelRegistry, showErrorStatus, showStatus]);
+  }, [apiPatch, appSettings.gpu_upgrade_prompt_seen, draftAppSettings, loadComputeStatus, loadModelRegistry, showErrorStatus, showStatus]);
 
   const onChooseModelFile = useCallback(async () => {
     try {
@@ -920,6 +1003,42 @@ function App() {
           </button>
         </div>
       ) : null}
+      {isGpuUpgradePromptOpen ? (
+        <div className="modal-overlay" onClick={onKeepCpuForNow}>
+          <div className="modal-card gpu-upgrade-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Compatible GPU Detected</h3>
+            </div>
+            <div className="modal-body">
+              <p className="helper usage-copy">
+                GPU acceleration is available on this computer. Enable it for faster model runs, evaluation, and fine-tuning.
+              </p>
+              {computeStatus?.gpu_runtime_ready ? (
+                <p className="helper usage-copy">
+                  This app can use the detected GPU right away if you enable the GPU preference now.
+                </p>
+              ) : (
+                <p className="helper usage-copy">
+                  This current build still runs on CPU, but saving the GPU preference now prepares the app for the optional GPU-enabled installer workflow later.
+                </p>
+              )}
+              {computeStatus?.detected_gpu_name ? (
+                <p className="helper usage-copy">
+                  Detected GPU: <strong>{computeStatus.detected_gpu_name}</strong>
+                </p>
+              ) : null}
+            </div>
+            <div className="settings-footer">
+              <button className="ghost" onClick={onKeepCpuForNow}>
+                Keep CPU for Now
+              </button>
+              <button className="primary" onClick={onEnableGpuPreference}>
+                Enable GPU Preference
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <RunView
         visible={isRunViewVisible}
@@ -974,6 +1093,7 @@ function App() {
       <SettingsView
         visible={isSettingsViewVisible}
         settings={appSettings}
+        computeStatus={computeStatus}
         draftSettings={draftAppSettings}
         onChangeSetting={onChangeAppSetting}
         onSaveSettings={onSaveSettings}
