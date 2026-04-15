@@ -19,6 +19,7 @@ import ImageDetailView from "./views/ImageDetailView.jsx";
 import ModelsView from "./views/ModelsView.jsx";
 import RunView from "./views/RunView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
+import UsageView from "./views/UsageView.jsx";
 
 function App() {
   const statusTimeoutRef = useRef(null);
@@ -386,6 +387,7 @@ function App() {
   const isImageDetailViewVisible = route.kind === "image";
   const isModelsViewVisible = route.kind === "models";
   const isSettingsViewVisible = route.kind === "settings";
+  const isUsageViewVisible = route.kind === "usage";
 
   const openAddModelModal = useCallback(() => {
     setIsAddModelModalOpen(true);
@@ -897,6 +899,7 @@ function App() {
         onGoHome={() => goToRoute("/")}
         onGoHistory={() => goToRoute("/history")}
         onGoModels={() => goToRoute("/models")}
+        onGoUsage={() => goToRoute("/usage")}
         onGoSettings={() => goToRoute("/settings")}
         onAddModel={onAddModel}
         onStartNewRun={onStartNewRun}
@@ -975,6 +978,15 @@ function App() {
         onChangeSetting={onChangeAppSetting}
         onSaveSettings={onSaveSettings}
         isSavingSettings={isSavingSettings}
+      />
+
+      <UsageView
+        visible={isUsageViewVisible}
+        onOpenSharedDrive={() => {
+          window.desktopAPI.openExternalUrl(
+            "https://drive.google.com/drive/folders/1GigNwEYUg6u1zxXWBg0SBv7gm660JccT?usp=drive_link"
+          ).catch(showErrorStatus);
+        }}
       />
 
       <ImageDetailView

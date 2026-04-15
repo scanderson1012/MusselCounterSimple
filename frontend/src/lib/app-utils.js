@@ -19,6 +19,10 @@ export function parseRoute(hashValue) {
     return { kind: "settings" };
   }
 
+  if (route === "/usage") {
+    return { kind: "usage" };
+  }
+
   const imageMatch = route.match(/^\/run\/(\d+)\/image\/(\d+)$/);
   if (imageMatch) {
     return {

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("desktopAPI", {
   isBackendReady: () => ipcRenderer.invoke("backend:is-ready"),
   pickImagePaths: () => ipcRenderer.invoke("dialog:pick-images"),
   pickModelFile: () => ipcRenderer.invoke("dialog:pick-model"),
+  openExternalUrl: (url) => ipcRenderer.invoke("shell:open-external", { url }),
   downloadBackendFile: (apiPath, defaultFileName) =>
     ipcRenderer.invoke("backend:download-file", { apiPath, defaultFileName }),
   apiGet: (apiPath) => ipcRenderer.invoke("backend:request", { method: "GET", apiPath }),

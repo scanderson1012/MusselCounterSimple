@@ -9,7 +9,7 @@
  *   do privileged work (filesystem, dialogs, backend proxy requests).
  */
 
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -341,6 +341,16 @@ ipcMain.handle("backend:download-file", async (_event, request) => {
   const arrayBuffer = await response.arrayBuffer();
   fs.writeFileSync(saveResult.filePath, Buffer.from(arrayBuffer));
   return { saved: true, filePath: saveResult.filePath };
+});
+
+// IPC endpoint: open an external URL in the user's default browser.
+ipcMain.handle("shell:open-external", async (_event, request) => {
+  const rawUrl = String(request?.url ?? "").trim();
+  if (!rawUrl) {
+    throw new Error("No URL provided.");
+  }
+  await shell.openExternal(rawUrl);
+  return { opened: true };
 });
 
 // IPC endpoint: open native file picker for input images.
