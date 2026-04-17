@@ -1,3 +1,4 @@
+import HelpTooltip from "../components/HelpTooltip.jsx";
 import RunImageCard from "../components/RunImageCard.jsx";
 
 /**
@@ -74,9 +75,29 @@ function RunView({
         </div>
 
         <div className="panel controls">
-          <h3>Run Settings</h3>
+          <div className="title-with-help">
+            <h3>Run Settings</h3>
+            <HelpTooltip
+              title="Run settings"
+              wide
+              content={[
+                "Choose a model, set how strict the app should be, add images, and start the run here.",
+                "These controls affect only the run you have open right now.",
+              ]}
+            />
+          </div>
           <div className="field">
-            <label htmlFor="model-select">Model</label>
+            <label htmlFor="model-select" className="label-with-help">
+              <span>Model</span>
+              <HelpTooltip
+                title="Model selection"
+                wide
+                content={[
+                  "Choose which saved model the app should use for this run.",
+                  "Different models may give different counts, so use the same one when you want a fair comparison.",
+                ]}
+              />
+            </label>
             <select id="model-select" value={selectedModelId} onChange={(event) => onModelChange(event.target.value)}>
               {models.length === 0 ? (
                 <option value="">No registered models</option>
@@ -91,7 +112,18 @@ function RunView({
           </div>
 
           <div className="field">
-            <label htmlFor="threshold-range">Threshold</label>
+            <label htmlFor="threshold-range" className="label-with-help">
+              <span>Threshold</span>
+              <HelpTooltip
+                title="Detection threshold"
+                wide
+                content={[
+                  "This setting controls how sure the app must be before it shows a box.",
+                  "A lower number usually shows more boxes. A higher number usually shows fewer boxes.",
+                  "Recalculate updates the counts without running the model again.",
+                ]}
+              />
+            </label>
             <div className="threshold-control">
               <input
                 id="threshold-range"
@@ -115,29 +147,65 @@ function RunView({
           </div>
 
           <div className="button-row">
-            <button id="pick-images-btn" className="ghost" onClick={onPickImages} disabled={isBusy}>
-              + Add Images
-            </button>
-            <button id="run-inference-btn" className="primary" onClick={onRunInference} disabled={isBusy}>
-              Start Run
-            </button>
-            <button id="recalculate-btn" className="ghost" onClick={onRecalculate} disabled={isBusy}>
-              Recalculate
-            </button>
-            <button id="finalize-reviewed-run-btn" className="ghost" onClick={onFinalizeReviewedRun} disabled={isBusy || currentRunImages.length === 0}>
-              Finalize Reviewed Labels
-            </button>
+            <div className="button-with-help">
+              <button id="pick-images-btn" className="ghost" onClick={onPickImages} disabled={isBusy}>
+                + Add Images
+              </button>
+              <HelpTooltip
+                title="Add images"
+                content="Adds microscope images to the current run queue before you start processing."
+              />
+            </div>
+            <div className="button-with-help">
+              <button id="run-inference-btn" className="primary" onClick={onRunInference} disabled={isBusy}>
+                Start Run
+              </button>
+              <HelpTooltip
+                title="Start run"
+                wide
+                content={[
+                  "Starts the model on the images in this run.",
+                  "Use this after choosing a model and adding images.",
+                ]}
+              />
+            </div>
+            <div className="button-with-help">
+              <button id="recalculate-btn" className="ghost" onClick={onRecalculate} disabled={isBusy}>
+                Recalculate
+              </button>
+              <HelpTooltip
+                title="Recalculate"
+                wide
+                content={[
+                  "Updates the live and dead counts using the setting above.",
+                  "This does not run the model again. It only updates the counts for boxes already saved in this run.",
+                ]}
+              />
+            </div>
+            <div className="button-with-help">
+              <button id="finalize-reviewed-run-btn" className="ghost" onClick={onFinalizeReviewedRun} disabled={isBusy || currentRunImages.length === 0}>
+                Finalize Reviewed Labels
+              </button>
+              <HelpTooltip
+                title="Finalize reviewed labels"
+                wide
+                content={[
+                  "This saves the boxes you kept and corrected so they can help make a better model later.",
+                  "Use this only after you finish checking the boxes you want to keep.",
+                ]}
+              />
+            </div>
           </div>
 
           <p id="selected-images-text" className="helper">
             {selectedImagesText}
           </p>
           <p className="helper">
-            Finalize reviewed labels: saves the current run's non-deleted boxes and classes into the replay buffer for future fine-tuning.
+            Finalize Reviewed Labels saves the boxes you kept so they can be used later when making a new model version.
           </p>
           {replayBufferSummary ? (
             <p className="helper">
-              Replay buffer snapshot: {replayBufferSummary.image_count} images, {replayBufferSummary.detection_count} mussels saved.
+              Saved for later: {replayBufferSummary.image_count} images, {replayBufferSummary.detection_count} mussels.
             </p>
           ) : null}
         </div>

@@ -1,3 +1,5 @@
+import HelpTooltip from "../components/HelpTooltip.jsx";
+
 /**
  * Application settings page.
  */
@@ -26,7 +28,7 @@ function SettingsView({
       <div className="run-header">
         <h1>Settings</h1>
         <p className="run-meta-text">
-          Manage app-wide fine-tuning behavior and compute preferences. These settings apply across all model families.
+          Change how many reviewed images are needed before you can make a new model version, and choose whether the app should try to use your GPU.
         </p>
       </div>
 
@@ -34,16 +36,36 @@ function SettingsView({
         <div className="panel settings-panel">
           <div className="settings-panel-header">
             <div>
-              <h3>Fine-Tuning</h3>
+              <div className="title-with-help">
+                <h3>Fine-Tuning</h3>
+                <HelpTooltip
+                  title="Fine-tuning settings"
+                  wide
+                  content={[
+                    "These settings control when you can make a new version of a model.",
+                    "They affect the whole app, not just the run you are looking at now.",
+                  ]}
+                />
+              </div>
               <p className="helper">
-                Control when fine-tuning becomes available and how many epochs each fine-tuning run should use.
+                Choose when making a new model version becomes available and how long that process should run.
               </p>
             </div>
           </div>
 
           <div className="settings-grid">
             <div className="field">
-              <label htmlFor="fine-tune-min-new-images">New Images Required</label>
+              <label htmlFor="fine-tune-min-new-images" className="label-with-help">
+                <span>New Images Required</span>
+                <HelpTooltip
+                  title="New images required"
+                  wide
+                  content={[
+                    "This is the number of reviewed images you need before the Fine-Tune button becomes available.",
+                    "A higher number means you wait longer. A lower number means it becomes available sooner.",
+                  ]}
+                />
+              </label>
               <input
                 id="fine-tune-min-new-images"
                 type="number"
@@ -52,12 +74,22 @@ function SettingsView({
                 onChange={(event) => onChangeSetting("fine_tune_min_new_images", event.target.value)}
               />
               <p className="helper">
-                Fine-tuning becomes available once the replay buffer has at least this many new finalized images for the latest version of a model.
+                Fine-Tune becomes available when the newest version of a model has at least this many reviewed images saved for later use.
               </p>
             </div>
 
             <div className="field">
-              <label htmlFor="fine-tune-num-epochs">Fine-Tuning Epochs</label>
+              <label htmlFor="fine-tune-num-epochs" className="label-with-help">
+                <span>Fine-Tuning Epochs</span>
+                <HelpTooltip
+                  title="Fine-tuning epochs"
+                  wide
+                  content={[
+                    "This number controls how many times the app goes through the images while making a new model version.",
+                    "A larger number usually means a longer run time.",
+                  ]}
+                />
+              </label>
               <input
                 id="fine-tune-num-epochs"
                 type="number"
@@ -66,7 +98,7 @@ function SettingsView({
                 onChange={(event) => onChangeSetting("fine_tune_num_epochs", event.target.value)}
               />
               <p className="helper">
-                An epoch is one full pass through the selected fine-tuning images plus the replay sample from older training data.
+                A larger number usually means the app works longer before the new version is ready.
               </p>
             </div>
           </div>
@@ -84,16 +116,37 @@ function SettingsView({
         <div className="panel settings-panel">
           <div className="settings-panel-header">
             <div>
-              <h3>Compute</h3>
+              <div className="title-with-help">
+                <h3>Compute</h3>
+                <HelpTooltip
+                  title="Compute settings"
+                  wide
+                  content={[
+                    "These settings decide whether the app should try to use the GPU in your computer.",
+                    "This can affect how fast the app runs.",
+                  ]}
+                />
+              </div>
               <p className="helper">
-                Choose whether the app should stay on CPU or use GPU acceleration when a compatible setup is available.
+                Choose whether the app should stay on the CPU or try to use the GPU when possible.
               </p>
             </div>
           </div>
 
           <div className="settings-grid">
             <div className="field">
-              <label htmlFor="compute-mode">Compute Mode</label>
+              <label htmlFor="compute-mode" className="label-with-help">
+                <span>Compute Mode</span>
+                <HelpTooltip
+                  title="Compute mode"
+                  wide
+                  content={[
+                    "Automatic lets the app decide.",
+                    "CPU Only means the app will always use the CPU.",
+                    "GPU If Available means the app will try to use the GPU when it is ready.",
+                  ]}
+                />
+              </label>
               <select
                 id="compute-mode"
                 value={draftSettings.compute_mode}
@@ -104,12 +157,23 @@ function SettingsView({
                 <option value="gpu_if_available">GPU if available</option>
               </select>
               <p className="helper">
-                Automatic and GPU modes both fall back to CPU if GPU acceleration is not ready on this computer.
+                If the GPU is not ready, the app will use the CPU instead.
               </p>
             </div>
 
             <div className="field">
-              <label>Current Status</label>
+              <label className="label-with-help">
+                <span>Current Status</span>
+                <HelpTooltip
+                  title="Current status"
+                  wide
+                  content={[
+                    "Preferred mode is the choice you saved.",
+                    "Active device is what the app is using right now.",
+                    "If the GPU is not ready, the app uses the CPU.",
+                  ]}
+                />
+              </label>
               <div className="settings-compute-summary">
                 <p className="settings-compute-line">
                   Preferred mode: <strong>{formatComputeModeLabel(settings.compute_mode)}</strong>
@@ -129,7 +193,7 @@ function SettingsView({
 
           <div className="settings-footer">
             <p className="helper">
-              CPU support is always kept available. GPU acceleration is used only when the computer and installed runtime support it.
+              The app can always use the CPU. It uses the GPU only when your computer is ready for it.
             </p>
             <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings}>
               {isSavingSettings ? "Saving..." : "Save Settings"}

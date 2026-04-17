@@ -9,6 +9,7 @@ import {
   waitMilliseconds,
 } from "./lib/app-utils.js";
 import DetectionModal from "./components/DetectionModal.jsx";
+import HelpTooltip from "./components/HelpTooltip.jsx";
 import LoadingBar from "./components/LoadingBar.jsx";
 import StatusBanner from "./components/StatusBanner.jsx";
 import TopBar from "./components/TopBar.jsx";
@@ -992,10 +993,20 @@ function App() {
       <LoadingBar loading={loading} />
       {fineTuneNotification ? (
         <div className="panel fine-tune-notice">
-          <div>
-            <p className="fine-tune-notice-title">Fine-Tuning Available</p>
+          <div className="fine-tune-notice-copy">
+            <div className="title-with-help">
+              <p className="fine-tune-notice-title">Fine-Tuning Available</p>
+              <HelpTooltip
+                title="Fine-tuning available"
+                wide
+                content={[
+                  "This appears when you have saved enough reviewed images to make a new version of a model.",
+                  "Open Models and click Fine-Tune on the newest version when you are ready.",
+                ]}
+              />
+            </div>
             <p className="helper">
-              {fineTuneNotification.familyName} {fineTuneNotification.versionTag} has {fineTuneNotification.imageCount} new replay-buffer images and {fineTuneNotification.detectionCount} mussels ready for fine-tuning.
+              {fineTuneNotification.familyName} {fineTuneNotification.versionTag} has {fineTuneNotification.imageCount} saved reviewed images and {fineTuneNotification.detectionCount} saved mussels ready for Fine-Tune.
             </p>
           </div>
           <button className="ghost" onClick={() => goToRoute("/models")}>

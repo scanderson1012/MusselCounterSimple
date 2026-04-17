@@ -5,6 +5,8 @@ module.exports = {
     asar: true,
     extraResource: [
       path.resolve(__dirname, "backend", "dist"),
+      path.resolve(__dirname, "bundled_assets"),
+      path.resolve(__dirname, "fasterrcnn_baseline.pth"),
     ],
   },
   makers: [

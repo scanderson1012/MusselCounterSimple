@@ -7,7 +7,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
       <div className="run-header">
         <h1>App Usage</h1>
         <p className="run-meta-text usage-intro-text">
-          Follow these step-by-step guides to run the app, review detections, manage models, and fine-tune new versions.
+          Follow these step-by-step guides to run the app, check results, manage models, and make newer versions.
         </p>
       </div>
 
@@ -19,18 +19,18 @@ function UsageView({ visible, onOpenSharedDrive }) {
           </p>
           <ol className="usage-step-list">
             <li>Open the Home page.</li>
-            <li>Select the model version you want to use.</li>
+            <li>Select the model you want to use.</li>
             <li>Upload one or more microscope images.</li>
             <li>Click the run button to start model execution.</li>
             <li>Wait for the app to finish counting live and dead mussels for each image.</li>
-            <li>If needed, adjust the threshold and recalculate counts without running the model again.</li>
+            <li>If needed, change the threshold setting and recalculate counts without running the model again.</li>
           </ol>
         </div>
 
         <div className="panel usage-panel">
           <h3>2. Review and Edit Detections</h3>
           <p className="helper usage-copy">
-            Review every run carefully so the saved labels are correct before they enter the replay buffer.
+            Review every run carefully so the saved boxes and labels are correct before they are saved for later.
           </p>
           <ol className="usage-step-list">
             <li>Open a processed image from the run results.</li>
@@ -45,74 +45,60 @@ function UsageView({ visible, onOpenSharedDrive }) {
         <div className="panel usage-panel">
           <h3>3. Finalize Reviewed Labels Into the Replay Buffer</h3>
           <p className="helper usage-copy">
-            Finalizing is what turns reviewed run results into training-ready examples for future fine-tuning.
+            Finalizing saves your reviewed boxes so they can help make a better model later.
           </p>
           <ol className="usage-step-list">
             <li>Finish reviewing the images in a run.</li>
             <li>Return to the Home page.</li>
             <li>Click the finalize button for that run.</li>
-            <li>The app stores the corrected labels in the replay buffer for the model version that created the run.</li>
-            <li>Those replay-buffer images are then available for future fine-tuning once the image threshold is reached.</li>
+            <li>The app saves the corrected boxes for the model that created the run.</li>
+            <li>Those saved images can later be used to make a new version once you have enough of them.</li>
           </ol>
         </div>
 
         <div className="panel usage-panel">
           <h3>4. Evaluate a Model on Its Test Set</h3>
           <p className="helper usage-copy">
-            Evaluation measures model quality on the test set that was assigned when the model was added.
+            This checks how well a model works on the test images saved with it.
           </p>
           <ol className="usage-step-list">
             <li>Open the Models page.</li>
-            <li>Find the model version you want to evaluate.</li>
+            <li>Find the model you want to test.</li>
             <li>Click <strong>Evaluate on Test Set</strong>.</li>
             <li>Wait for the progress bar to finish, or cancel if needed.</li>
-            <li>The app saves the evaluation metrics for that version after the run completes.</li>
-            <li>Each model version only needs to be evaluated once on its assigned test set.</li>
+            <li>The app saves the test results for that model after it finishes.</li>
+            <li>Each model only needs to be tested once unless you add a new version.</li>
           </ol>
         </div>
 
         <div className="panel usage-panel">
           <h3>5. Fine-Tune the Latest Model Version</h3>
           <p className="helper usage-copy">
-            Fine-tuning creates the next version of a model by learning from reviewed replay-buffer images.
+            Fine-Tune makes a new version of a model using reviewed images you saved earlier.
           </p>
           <ol className="usage-step-list">
-            <li>Open the Settings page and confirm the fine-tuning image threshold and epoch count.</li>
-            <li>Keep reviewing and finalizing runs until the replay buffer reaches the required number of new images.</li>
-            <li>Wait for the global notification that fine-tuning is available.</li>
-            <li>Open the Models page and click <strong>Fine-Tune</strong> on the newest model version.</li>
-            <li>The app uses the oldest eligible replay-buffer images first and combines them with randomly selected older training images.</li>
-            <li>When fine-tuning finishes, a new model version is created and the used replay-buffer images are removed from the buffer.</li>
-            <li>If you cancel fine-tuning, nothing is saved and the replay buffer stays unchanged.</li>
+            <li>Open the Settings page and check how many reviewed images are needed and how many times the app should go through them.</li>
+            <li>Keep reviewing and finalizing runs until you have enough saved images.</li>
+            <li>Wait for the app to show that Fine-Tune is available.</li>
+            <li>Open the Models page and click <strong>Fine-Tune</strong> on the newest version of that model.</li>
+            <li>The app uses saved reviewed images and some older images it already knows.</li>
+            <li>When Fine-Tune finishes, the app creates a new model version and removes the used saved images from the list.</li>
+            <li>If you cancel Fine-Tune, nothing is saved and the list stays the same.</li>
           </ol>
         </div>
 
         <div className="panel usage-panel">
-          <h3>6. Understand Version Deletion and Rollback</h3>
+          <h3>6. Export and Share Models</h3>
           <p className="helper usage-copy">
-            Deletion rules are designed to keep model history clean and predictable.
-          </p>
-          <ol className="usage-step-list">
-            <li>Deleting a model version removes that version and every newer version after it in the same family.</li>
-            <li>If you delete the newest versions, the latest remaining older version becomes the active newest version again.</li>
-            <li>Replay-buffer images consumed by deleted newer versions are restored so they can be used again later.</li>
-            <li>Deleting version 1 is treated like deleting the whole model family.</li>
-            <li>The bundled baseline model family cannot be deleted, and its version 1 cannot be deleted.</li>
-          </ol>
-        </div>
-
-        <div className="panel usage-panel">
-          <h3>7. Export and Share Models</h3>
-          <p className="helper usage-copy">
-            Exporting packages a model version so another user can add it into their own copy of the app.
+            Exporting saves a model as a shareable zip file so another user can add it to their app.
           </p>
           <ol className="usage-step-list">
             <li>Open the Models page.</li>
-            <li>Find the model version you want to share.</li>
+            <li>Find the model you want to share.</li>
             <li>Click <strong>Export</strong>.</li>
-            <li>The app downloads a zip file containing the model checkpoint file and the model information document.</li>
+            <li>The app downloads a zip file with the model file and its information file.</li>
             <li>Share that exported package with another user.</li>
-            <li>The other user can then add the model into their own app with the normal Add Model workflow.</li>
+            <li>The other user can then add it to their app with the normal Add Model steps.</li>
           </ol>
         </div>
       </div>
@@ -121,8 +107,8 @@ function UsageView({ visible, onOpenSharedDrive }) {
         <div className="run-header usage-subsection-header">
           <h2>Model Sharing</h2>
           <p className="helper usage-copy">
-            Use this section to share models between users with the shared Google Drive. This is separate from normal app
-            usage and is meant for moving model files and model information documents between team members.
+            Use this section to share models between users with the shared Google Drive. This is separate from everyday app
+            use and is meant for moving model files and model information files between team members.
           </p>
         </div>
 
@@ -133,11 +119,11 @@ function UsageView({ visible, onOpenSharedDrive }) {
           </button>
           <ol className="usage-step-list">
             <li>Open the shared drive using the button above.</li>
-            <li>Use the baseline training set, baseline test set, and baseline model file as the shared starting point for all users.</li>
+            <li>Use the shared starting model and image folders as the starting point for all users.</li>
             <li>When you want to share a model, export it from the app first.</li>
             <li>Create a new folder on the drive using the model name.</li>
-            <li>Upload the exported model information document and the model `.pth` or `.pt` file into that folder.</li>
-            <li>Other users can then download those files from the drive and add the model into their own app.</li>
+            <li>Upload the exported information file and the model `.pth` or `.pt` file into that folder.</li>
+            <li>Other users can then download those files and add the model to their own app.</li>
           </ol>
           <div className="usage-example-block">
             <p className="usage-example-title">Folder layout</p>

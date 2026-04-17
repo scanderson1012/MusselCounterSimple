@@ -125,6 +125,8 @@ async function startBackendServer() {
     }
     const backendDataDir = path.join(app.getPath("userData"), "backend");
     const packagedWorkingDirectory = process.resourcesPath;
+    const bundledAssetsDir = path.join(process.resourcesPath, "bundled_assets");
+    const baselineModelPath = path.join(process.resourcesPath, "fasterrcnn_baseline.pth");
 
     backendProcess = spawn(executablePath, [], {
       cwd: packagedWorkingDirectory,
@@ -133,6 +135,8 @@ async function startBackendServer() {
         MUSSEL_API_HOST: API_HOST,
         MUSSEL_API_PORT: String(backendPort),
         MUSSEL_APP_DATA_DIR: backendDataDir,
+        MUSSEL_BUNDLED_ASSETS_DIR: bundledAssetsDir,
+        MUSSEL_BASELINE_MODEL_PATH: baselineModelPath,
       },
       stdio: "pipe",
     });

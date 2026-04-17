@@ -1,3 +1,5 @@
+import HelpTooltip from "../components/HelpTooltip.jsx";
+
 /**
  * Models registry page and add-model / model-info modals.
  */
@@ -61,21 +63,31 @@ function ModelsView({
       <div className="run-header">
         <h1>Models</h1>
         <p className="run-meta-text">
-          Browse stored models and versions, review their evaluation results, and export model packages.
+          View saved models, check how they performed, and export them to share with someone else.
         </p>
       </div>
 
       <div className="panel models-help-panel">
-        <h3>How Model Registration Works</h3>
+        <div className="title-with-help">
+          <h3>How Model Registration Works</h3>
+          <HelpTooltip
+            title="Model registration"
+            wide
+            content={[
+              "Add Model saves a model file in the app and records where its training and test images came from.",
+              "The app does not test the model until you click Evaluate on Test Set.",
+            ]}
+          />
+        </div>
         <p className="helper">
-          Click <strong>Add Model</strong>, choose a `.pth` or `.pt` checkpoint file, then enter a model name, a clear description,
-          and the training/test dataset image and label folder paths.
+          Click <strong>Add Model</strong>, choose a `.pth` or `.pt` model file, then enter a model name, a clear description,
+          and the folder paths for the images and labels used to train and test it.
         </p>
         <p className="helper">
-          The description should explain what the model is, what scope of data it should be tested on, and the intended use cases.
+          The description should explain what the model is for, what kinds of images it fits, and when someone should use it.
         </p>
         <p className="helper">
-          After submission, the app stores the model and links its training and test datasets. Evaluation runs only when you click
+          After you save it, the app stores the model and its folder information. The test only runs when you click
           <strong> Evaluate on Test Set</strong> for that version.
         </p>
       </div>
@@ -114,29 +126,79 @@ function ModelsView({
                           {family.name} {version.version_tag}
                         </p>
                         <p className="muted">
-                          Replay buffer: {Number(version.replay_buffer_counts?.image_count || 0)} images | {Number(version.replay_buffer_counts?.detection_count || 0)} mussels
+                          Saved reviewed images: {Number(version.replay_buffer_counts?.image_count || 0)} | Saved mussels: {Number(version.replay_buffer_counts?.detection_count || 0)}
                         </p>
                       </div>
 
                       <div className="model-version-actions">
                         {version.is_latest_version ? (
-                          <button className="ghost" onClick={() => onFineTuneModelVersion({ ...version, family_name: family.name })}>
-                            Fine-Tune
-                          </button>
+                          <div className="button-with-help">
+                            <button className="ghost" onClick={() => onFineTuneModelVersion({ ...version, family_name: family.name })}>
+                              Fine-Tune
+                            </button>
+                            <HelpTooltip
+                              title="Fine-tune"
+                              wide
+                              content={[
+                                "Makes a new version of this model using reviewed images you saved earlier.",
+                                "Only the newest version has this button.",
+                              ]}
+                            />
+                          </div>
                         ) : null}
-                        <button className="ghost" onClick={() => onEvaluateModelVersion({ ...version, family_name: family.name })}>
-                          Evaluate on Test Set
-                        </button>
-                        <button className="ghost" onClick={() => onOpenModelInfo(version.id)}>
-                          Model Information
-                        </button>
-                        <button className="ghost" onClick={() => onExportModelVersion({ ...version, family_name: family.name })}>
-                          Export
-                        </button>
-                        {canDeleteVersion ? (
-                          <button className="ghost" onClick={() => onDeleteModelVersion({ ...version, family_name: family.name })}>
-                            Delete Version
+                        <div className="button-with-help">
+                          <button className="ghost" onClick={() => onEvaluateModelVersion({ ...version, family_name: family.name })}>
+                            Evaluate on Test Set
                           </button>
+                          <HelpTooltip
+                            title="Evaluate on test set"
+                            wide
+                            content={[
+                              "Tests this model on its saved test images and records the results.",
+                              "Use this when you want to compare models in a fair way.",
+                            ]}
+                          />
+                        </div>
+                        <div className="button-with-help">
+                          <button className="ghost" onClick={() => onOpenModelInfo(version.id)}>
+                            Model Information
+                          </button>
+                          <HelpTooltip
+                            title="Model information"
+                            wide
+                            content={[
+                              "Opens the saved description, folder details, and test results for this version.",
+                              "Use this to check what the model is for before you run it or share it.",
+                            ]}
+                          />
+                        </div>
+                        <div className="button-with-help">
+                          <button className="ghost" onClick={() => onExportModelVersion({ ...version, family_name: family.name })}>
+                            Export
+                          </button>
+                          <HelpTooltip
+                            title="Export"
+                            wide
+                            content={[
+                              "Saves this model version as a zip file you can share.",
+                              "Someone else can add that file to their copy of the app.",
+                            ]}
+                          />
+                        </div>
+                        {canDeleteVersion ? (
+                          <div className="button-with-help">
+                            <button className="ghost" onClick={() => onDeleteModelVersion({ ...version, family_name: family.name })}>
+                              Delete Version
+                            </button>
+                            <HelpTooltip
+                              title="Delete version"
+                              wide
+                              content={[
+                                "Deleting this version also deletes every newer version after it.",
+                                "Use this carefully because it removes part of the model's history.",
+                              ]}
+                            />
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -157,15 +219,35 @@ function ModelsView({
             </div>
             <div className="modal-body">
               <div className="field">
-                <label>Model File</label>
+                <label className="label-with-help">
+                  <span>Model File</span>
+                  <HelpTooltip
+                    title="Model file"
+                    wide
+                    content={[
+                      "Choose the model file you want to save in the app.",
+                      "The app accepts .pth and .pt files.",
+                    ]}
+                  />
+                </label>
                 <button className="ghost modal-wide-btn" onClick={onChooseModelFile}>
                   {modelForm.selected_model_file_name || "Choose .pth or .pt file"}
                 </button>
-                <p className="helper">Select the actual checkpoint file. The app will store it in managed model storage.</p>
+                <p className="helper">Choose the model file itself. The app will save its own copy.</p>
               </div>
 
               <div className="field">
-                <label htmlFor="model-family-name">Model Name</label>
+                <label htmlFor="model-family-name" className="label-with-help">
+                  <span>Model Name</span>
+                  <HelpTooltip
+                    title="Model name"
+                    wide
+                    content={[
+                      "This is the name people will see in the app.",
+                      "Newer versions of this model will stay grouped under this name.",
+                    ]}
+                  />
+                </label>
                 <input
                   id="model-family-name"
                   type="text"
@@ -176,7 +258,17 @@ function ModelsView({
               </div>
 
               <div className="field">
-                <label htmlFor="model-description">Model Description</label>
+                <label htmlFor="model-description" className="label-with-help">
+                  <span>Model Description</span>
+                  <HelpTooltip
+                    title="Model description"
+                    wide
+                    content={[
+                      "Describe what the model looks for, what kinds of images it works well on, and when to use it.",
+                      "This helps people choose the right model.",
+                    ]}
+                  />
+                </label>
                 <textarea
                   id="model-description"
                   rows="6"
@@ -185,13 +277,23 @@ function ModelsView({
                   onChange={(event) => onUpdateModelForm("description", event.target.value)}
                 />
                 <p className="helper">
-                  Include: what the model detects, the types of images or conditions it should be tested on, and when users should choose it.
+                  Include what the model looks for, what kinds of images it works well on, and when someone should use it.
                 </p>
               </div>
 
               <div className="models-register-grid">
                 <div className="field">
-                  <label htmlFor="training-images-dir">Training Images Folder Path</label>
+                  <label htmlFor="training-images-dir" className="label-with-help">
+                    <span>Training Images Folder Path</span>
+                    <HelpTooltip
+                      title="Training images folder"
+                      wide
+                      content={[
+                        "Enter the folder path for the images used to make this model.",
+                        "This helps people know where the model came from.",
+                      ]}
+                    />
+                  </label>
                   <input
                     id="training-images-dir"
                     type="text"
@@ -200,7 +302,17 @@ function ModelsView({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="training-labels-dir">Training Labels Folder Path</label>
+                  <label htmlFor="training-labels-dir" className="label-with-help">
+                    <span>Training Labels Folder Path</span>
+                    <HelpTooltip
+                      title="Training labels folder"
+                      wide
+                      content={[
+                        "Enter the folder path for the labels that match the training images.",
+                        "This is saved as part of the model's record.",
+                      ]}
+                    />
+                  </label>
                   <input
                     id="training-labels-dir"
                     type="text"
@@ -209,7 +321,17 @@ function ModelsView({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="test-images-dir">Test Images Folder Path</label>
+                  <label htmlFor="test-images-dir" className="label-with-help">
+                    <span>Test Images Folder Path</span>
+                    <HelpTooltip
+                      title="Test images folder"
+                      wide
+                      content={[
+                        "Enter the folder path for the images used to test this model.",
+                        "These should be separate from the images used to make the model.",
+                      ]}
+                    />
+                  </label>
                   <input
                     id="test-images-dir"
                     type="text"
@@ -218,7 +340,17 @@ function ModelsView({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="test-labels-dir">Test Labels Folder Path</label>
+                  <label htmlFor="test-labels-dir" className="label-with-help">
+                    <span>Test Labels Folder Path</span>
+                    <HelpTooltip
+                      title="Test labels folder"
+                      wide
+                      content={[
+                        "Enter the folder path for the labels that match the test images.",
+                        "The app uses these when it tests the model.",
+                      ]}
+                    />
+                  </label>
                   <input
                     id="test-labels-dir"
                     type="text"
@@ -229,7 +361,16 @@ function ModelsView({
               </div>
 
               <div className="field">
-                <label htmlFor="model-notes">Notes</label>
+                <label htmlFor="model-notes" className="label-with-help">
+                  <span>Notes</span>
+                  <HelpTooltip
+                    title="Notes"
+                    wide
+                    content={[
+                      "Optional space for reminders or extra details.",
+                    ]}
+                  />
+                </label>
                 <textarea
                   id="model-notes"
                   rows="3"

@@ -7,6 +7,9 @@ import sqlite3
 BACKEND_DIRECTORY = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIRECTORY.parent
 APP_DATA = Path(os.getenv("MUSSEL_APP_DATA_DIR", str(PROJECT_ROOT / "app_data"))).expanduser().resolve()
+BUNDLED_ASSETS_DIRECTORY = Path(
+    os.getenv("MUSSEL_BUNDLED_ASSETS_DIR", str(PROJECT_ROOT / "bundled_assets"))
+).expanduser().resolve()
 DB_PATH = APP_DATA / "app.db"
 IMAGES_DIRECTORY = APP_DATA / "images"
 MODELS_DIRECTORY = APP_DATA / "models"
@@ -19,25 +22,25 @@ BASELINE_MODEL_PATH = Path(
 BASELINE_TRAIN_IMAGES_DIR = Path(
     os.getenv(
         "MUSSEL_BASELINE_TRAIN_IMAGES_DIR",
-        r"C:\Users\scand\Downloads\Capstone baseline datasets\train\images",
+        str(BUNDLED_ASSETS_DIRECTORY / "baseline_train" / "images"),
     )
 ).expanduser().resolve()
 BASELINE_TRAIN_LABELS_DIR = Path(
     os.getenv(
         "MUSSEL_BASELINE_TRAIN_LABELS_DIR",
-        r"C:\Users\scand\Downloads\Capstone baseline datasets\train\labels",
+        str(BUNDLED_ASSETS_DIRECTORY / "baseline_train" / "labels"),
     )
 ).expanduser().resolve()
 BASELINE_TEST_IMAGES_DIR = Path(
     os.getenv(
         "MUSSEL_BASELINE_TEST_IMAGES_DIR",
-        r"C:\Users\scand\Downloads\Capstone baseline datasets\test\images",
+        str(BUNDLED_ASSETS_DIRECTORY / "baseline_test" / "images"),
     )
 ).expanduser().resolve()
 BASELINE_TEST_LABELS_DIR = Path(
     os.getenv(
         "MUSSEL_BASELINE_TEST_LABELS_DIR",
-        r"C:\Users\scand\Downloads\Capstone baseline datasets\test\labels",
+        str(BUNDLED_ASSETS_DIRECTORY / "baseline_test" / "labels"),
     )
 ).expanduser().resolve()
 BASELINE_TRAIN_DATASET_NAME = os.getenv("MUSSEL_BASELINE_TRAIN_DATASET_NAME", "baseline_train")
@@ -106,6 +109,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)
         _backfill_bundled_baseline_description(conn)
+        _backfill_bundled_baseline_dataset_paths(conn)
     _seed_default_app_settings(conn)
 
 
@@ -258,6 +262,57 @@ def _backfill_bundled_baseline_description(conn: sqlite3.Connection) -> None:
         """,
         (BASELINE_MODEL_DESCRIPTION, BASELINE_MODEL_FAMILY_NAME),
     )
+
+
+def _backfill_bundled_baseline_dataset_paths(conn: sqlite3.Connection) -> None:
+    """Repair bundled baseline dataset paths for existing installs."""
+    if not BASELINE_TRAIN_IMAGES_DIR.is_dir() or not BASELINE_TRAIN_LABELS_DIR.is_dir():
+        return
+    if not BASELINE_TEST_IMAGES_DIR.is_dir() or not BASELINE_TEST_LABELS_DIR.is_dir():
+        return
+
+    baseline_row = conn.execute(
+        """
+        SELECT
+            model_versions.training_dataset_id,
+            model_versions.test_dataset_id
+        FROM model_versions
+        JOIN model_families ON model_families.id = model_versions.family_id
+        WHERE model_families.name = ? AND model_versions.version_number = 1
+        """,
+        (BASELINE_MODEL_FAMILY_NAME,),
+    ).fetchone()
+    if baseline_row is None:
+        return
+
+    training_dataset_id = baseline_row["training_dataset_id"]
+    test_dataset_id = baseline_row["test_dataset_id"]
+    if training_dataset_id is not None:
+        conn.execute(
+            """
+            UPDATE training_datasets
+            SET images_dir = ?, labels_dir = ?
+            WHERE id = ?
+            """,
+            (
+                str(BASELINE_TRAIN_IMAGES_DIR),
+                str(BASELINE_TRAIN_LABELS_DIR),
+                int(training_dataset_id),
+            ),
+        )
+    if test_dataset_id is not None:
+        conn.execute(
+            """
+            UPDATE test_datasets
+            SET images_dir = ?, labels_dir = ?
+            WHERE id = ?
+            """,
+            (
+                str(BASELINE_TEST_IMAGES_DIR),
+                str(BASELINE_TEST_LABELS_DIR),
+                int(test_dataset_id),
+            ),
+        )
 
 
 def _get_or_create_seed_dataset(
