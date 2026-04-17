@@ -13,7 +13,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
 
       <div className="usage-section-grid">
         <div className="panel usage-panel">
-          <h3>1. Run a Model on New Images</h3>
+          <h3 className="usage-panel-title">1. Run a Model on New Images</h3>
           <p className="helper usage-copy">
             Use this process when you want the app to count mussels in new microscope images.
           </p>
@@ -28,7 +28,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel">
-          <h3>2. Review and Edit Detections</h3>
+          <h3 className="usage-panel-title">2. Review and Edit Detections</h3>
           <p className="helper usage-copy">
             Review every run carefully so the saved boxes and labels are correct before they are saved for later.
           </p>
@@ -43,7 +43,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel">
-          <h3>3. Finalize Reviewed Labels Into the Replay Buffer</h3>
+          <h3 className="usage-panel-title">3. Finalize Reviewed Labels Into the Replay Buffer</h3>
           <p className="helper usage-copy">
             Finalizing saves your reviewed boxes so they can help make a better model later.
           </p>
@@ -57,7 +57,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel">
-          <h3>4. Evaluate a Model on Its Test Set</h3>
+          <h3 className="usage-panel-title">4. Evaluate a Model on Its Test Set</h3>
           <p className="helper usage-copy">
             This checks how well a model works on the test images saved with it.
           </p>
@@ -72,7 +72,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel">
-          <h3>5. Fine-Tune the Latest Model Version</h3>
+          <h3 className="usage-panel-title">5. Fine-Tune the Latest Model Version</h3>
           <p className="helper usage-copy">
             Fine-Tune makes a new version of a model using reviewed images you saved earlier.
           </p>
@@ -88,7 +88,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel">
-          <h3>6. Export and Share Models</h3>
+          <h3 className="usage-panel-title">6. Export and Share Models</h3>
           <p className="helper usage-copy">
             Exporting saves a model as a shareable zip file so another user can add it to their app.
           </p>
@@ -113,7 +113,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         </div>
 
         <div className="panel usage-panel usage-drive-panel">
-          <h3>Shared Google Drive Workflow</h3>
+          <h3 className="usage-panel-title">Shared Google Drive Workflow</h3>
           <button className="ghost usage-link-btn" onClick={onOpenSharedDrive}>
             Open Shared Google Drive
           </button>

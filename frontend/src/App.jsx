@@ -32,6 +32,7 @@ function App() {
   const [runs, setRuns] = useState([]);
   const [currentRun, setCurrentRun] = useState(null);
   const [pendingImagePaths, setPendingImagePaths] = useState([]);
+  const [selectedModelFamilyId, setSelectedModelFamilyId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [thresholdValue, setThresholdValue] = useState(DEFAULT_THRESHOLD);
   const [isBusy, setIsBusy] = useState(false);
@@ -346,6 +347,7 @@ function App() {
 
   useEffect(() => {
     if (models.length === 0) {
+      setSelectedModelFamilyId("");
       setSelectedModelId("");
       return;
     }
@@ -354,6 +356,75 @@ function App() {
       setSelectedModelId(String(models[0].id));
     }
   }, [models, selectedModelId]);
+
+  const groupedRunModelFamilies = useMemo(() => {
+    const groups = [];
+    const familyMap = new Map();
+    for (const model of models) {
+      const familyId = String(model.family_id);
+      if (!familyMap.has(familyId)) {
+        const group = {
+          family_id: familyId,
+          family_name: model.family_name,
+          versions: [],
+        };
+        familyMap.set(familyId, group);
+        groups.push(group);
+      }
+      familyMap.get(familyId).versions.push(model);
+    }
+    return groups;
+  }, [models]);
+
+  const versionsForSelectedFamily = useMemo(() => {
+    if (!selectedModelFamilyId) {
+      return [];
+    }
+    return models.filter((model) => String(model.family_id) === String(selectedModelFamilyId));
+  }, [models, selectedModelFamilyId]);
+
+  useEffect(() => {
+    if (models.length === 0) {
+      setSelectedModelFamilyId("");
+      return;
+    }
+    const selectedModel = models.find((model) => String(model.id) === String(selectedModelId)) || null;
+    if (selectedModel) {
+      const familyId = String(selectedModel.family_id);
+      if (String(selectedModelFamilyId) !== familyId) {
+        setSelectedModelFamilyId(familyId);
+      }
+      return;
+    }
+    const firstFamilyId = String(models[0].family_id);
+    if (String(selectedModelFamilyId) !== firstFamilyId) {
+      setSelectedModelFamilyId(firstFamilyId);
+    }
+  }, [models, selectedModelFamilyId, selectedModelId]);
+
+  useEffect(() => {
+    if (!selectedModelFamilyId) {
+      return;
+    }
+    const matchingVersions = models.filter((model) => String(model.family_id) === String(selectedModelFamilyId));
+    if (matchingVersions.length === 0) {
+      return;
+    }
+    const selectedVersionMatchesFamily = matchingVersions.some((model) => String(model.id) === String(selectedModelId));
+    if (!selectedVersionMatchesFamily) {
+      setSelectedModelId(String(matchingVersions[0].id));
+    }
+  }, [models, selectedModelFamilyId, selectedModelId]);
+
+  const onChangeModelFamily = useCallback((nextFamilyId) => {
+    setSelectedModelFamilyId(nextFamilyId);
+    const matchingVersions = models.filter((model) => String(model.family_id) === String(nextFamilyId));
+    if (matchingVersions.length === 0) {
+      setSelectedModelId("");
+      return;
+    }
+    setSelectedModelId(String(matchingVersions[0].id));
+  }, [models]);
 
   const routedRunId = useMemo(() => {
     if (route.kind === "run" || route.kind === "image") {
@@ -1055,8 +1126,11 @@ function App() {
         visible={isRunViewVisible}
         runSummary={runSummary}
         totalReadyImages={totalReadyImages}
-        models={models}
+        models={versionsForSelectedFamily}
+        modelFamilies={groupedRunModelFamilies}
+        selectedModelFamilyId={selectedModelFamilyId}
         selectedModelId={selectedModelId}
+        onModelFamilyChange={onChangeModelFamily}
         onModelChange={setSelectedModelId}
         thresholdValue={thresholdValue}
         onThresholdChange={(rawValue) => setThresholdValue(clampThreshold(rawValue))}

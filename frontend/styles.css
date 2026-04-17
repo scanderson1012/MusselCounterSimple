@@ -1339,8 +1339,16 @@ input[type="range"] {
 
 .usage-panel {
   display: grid;
+  align-content: start;
   gap: 12px;
   padding: 22px 24px;
+}
+
+.usage-panel-title {
+  display: flex;
+  align-items: flex-start;
+  min-height: 2.6em;
+  line-height: 1.3;
 }
 
 .usage-copy {

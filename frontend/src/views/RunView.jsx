@@ -9,7 +9,10 @@ function RunView({
   runSummary,
   totalReadyImages,
   models,
+  modelFamilies,
+  selectedModelFamilyId,
   selectedModelId,
+  onModelFamilyChange,
   onModelChange,
   thresholdValue,
   onThresholdChange,
@@ -87,24 +90,53 @@ function RunView({
             />
           </div>
           <div className="field">
-            <label htmlFor="model-select" className="label-with-help">
-              <span>Model</span>
+            <label htmlFor="model-family-select" className="label-with-help">
+              <span>Model family</span>
               <HelpTooltip
-                title="Model selection"
+                title="Model family"
                 wide
                 content={[
-                  "Choose which saved model the app should use for this run.",
-                  "Different models may give different counts, so use the same one when you want a fair comparison.",
+                  "Choose the main model group first.",
+                  "Then choose the version from that group that you want to run.",
+                ]}
+              />
+            </label>
+            <select
+              id="model-family-select"
+              value={selectedModelFamilyId}
+              onChange={(event) => onModelFamilyChange(event.target.value)}
+            >
+              {modelFamilies.length === 0 ? (
+                <option value="">No model families</option>
+              ) : (
+                modelFamilies.map((family) => (
+                  <option key={family.family_id} value={family.family_id}>
+                    {family.family_name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="model-select" className="label-with-help">
+              <span>Version</span>
+              <HelpTooltip
+                title="Version"
+                wide
+                content={[
+                  "Choose which saved version in this model family the app should use for this run.",
+                  "Different versions may give different counts, so use the same one when you want a fair comparison.",
                 ]}
               />
             </label>
             <select id="model-select" value={selectedModelId} onChange={(event) => onModelChange(event.target.value)}>
               {models.length === 0 ? (
-                <option value="">No registered models</option>
+                <option value="">No versions available</option>
               ) : (
                 models.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.file_name}
+                    {model.version_tag}
                   </option>
                 ))
               )}
