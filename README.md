@@ -62,6 +62,23 @@ This edit view keeps a human in the loop: you can correct labels or delete incor
 - Node.js 20+
 - Python 3.11+
 
+## Installer Downloads
+
+Download the installer package that matches your operating system from the latest GitHub release.
+
+- Windows 10/11 ZIP: `https://github.com/scanderson1012/MusselCounterSimple/releases/download/v0.1.0/mussel-counter-simple-win32-x64-0.1.0.zip`
+- macOS DMG: add your release asset link here after upload
+
+The desktop installers include:
+
+- the bundled baseline model `baseline_fasterrcnn_model`
+- the bundled baseline training dataset
+- the bundled baseline test dataset
+
+Current limitation:
+
+- macOS currently runs on CPU only. Optional GPU runtime support is implemented for Windows only.
+
 ## Run Locally (Development on macOS/Linux)
 
 ### Download Everything
@@ -98,18 +115,21 @@ npm ci
 npm start
 ```
 
-## Build macOS `.dmg` (on macOS)
+## Build Installer Packages
+
+### Build macOS `.dmg` (on macOS)
 
 ```bash
 # while in /MusselCounterSimple
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
-npm run make:desktop -- --platform=darwin --arch=arm64
+npm run make:desktop:mac -- --arch=arm64
 find out/make -name "*.dmg"
 ```
 
-## Build Windows `.zip` (Portable, on Windows)
+### Build Windows `.zip` (Portable, on Windows)
 
 ```powershell
 # while in /MusselCounterSimple
@@ -117,7 +137,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
-npm run make:desktop
+npm run make:desktop:win
 ```
 
 Windows ZIP output will be under:
@@ -128,6 +148,12 @@ out\make\zip\win32\...
 
 To use it, extract the ZIP on Windows and run `mussel-counter-simple.exe` from the extracted folder.
 
+### Optional Windows GPU Runtime Build
+
+The default Windows installer is CPU-first. To include the optional NVIDIA GPU runtime in the Windows build, prepare a second build environment with the GPU requirements and build the GPU backend before running the Windows packaging command.
+
+Detailed commands are in [docs/INSTALLER_BUILD.md](docs/INSTALLER_BUILD.md).
+
 ## How To Use The App
 
 ### Add A Model
@@ -135,6 +161,8 @@ To use it, extract the ZIP on Windows and run `mussel-counter-simple.exe` from t
 To add a model in the app, click `Add Model` in the top-right, then select your `.pt` or `.pth` file.
 
 Current support is limited to PyTorch RCNN models.
+
+On first launch, the app already includes the bundled `baseline_fasterrcnn_model` together with its matching training and test datasets.
 
 ### Run Page (Home Page)
 

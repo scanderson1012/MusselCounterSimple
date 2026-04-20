@@ -20,13 +20,18 @@ const DEFAULT_API_PORT = 8000;
 const MAX_PORT_SCAN_COUNT = 40;
 const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
 const BACKEND_READINESS_POLL_MS = 500;
+const BACKEND_STOP_TIMEOUT_MS = 15_000;
 const ROOT_DIR = path.resolve(__dirname, "..");
 const UI_INDEX_PATH = path.join(ROOT_DIR, "frontend", "dist", "index.html");
+const BACKEND_RUNTIME_CPU = "cpu";
+const BACKEND_RUNTIME_GPU = "gpu";
+const BACKEND_RUNTIME_CONFIG_FILE_NAME = "backend-runtime.json";
 
 let backendProcess = null;
 let mainWindow = null;
 let backendPort = DEFAULT_API_PORT;
 let backendBaseUrl = `http://${API_HOST}:${DEFAULT_API_PORT}`;
+let backendRuntimeVariant = BACKEND_RUNTIME_CPU;
 
 /** Pause execution for a fixed number of milliseconds. */
 function waitMilliseconds(durationMilliseconds) {
@@ -54,11 +59,68 @@ function getPythonCommand() {
 }
 
 /** Return the packaged backend executable path used in production builds. */
-function getPackagedBackendExecutablePath() {
+function getPackagedBackendExecutablePath(runtimeVariant = BACKEND_RUNTIME_CPU) {
+  if (runtimeVariant === BACKEND_RUNTIME_GPU) {
+    const executableName = process.platform === "win32"
+      ? "mussel-backend-gpu.exe"
+      : "mussel-backend-gpu";
+    return path.join(process.resourcesPath, "dist_gpu", executableName);
+  }
+
   const executableName = process.platform === "win32"
     ? "mussel-backend.exe"
     : "mussel-backend";
   return path.join(process.resourcesPath, "dist", executableName);
+}
+
+function getRuntimeConfigPath() {
+  return path.join(app.getPath("userData"), BACKEND_RUNTIME_CONFIG_FILE_NAME);
+}
+
+function readRuntimeConfig() {
+  const runtimeConfigPath = getRuntimeConfigPath();
+  if (!fs.existsSync(runtimeConfigPath)) {
+    return { preferredRuntimeVariant: BACKEND_RUNTIME_CPU };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf-8"));
+    return {
+      preferredRuntimeVariant: parsed?.preferredRuntimeVariant === BACKEND_RUNTIME_GPU
+        ? BACKEND_RUNTIME_GPU
+        : BACKEND_RUNTIME_CPU,
+      lastGpuActivationError: String(parsed?.lastGpuActivationError || ""),
+    };
+  } catch {
+    return { preferredRuntimeVariant: BACKEND_RUNTIME_CPU };
+  }
+}
+
+function writeRuntimeConfig(nextConfig) {
+  const runtimeConfigPath = getRuntimeConfigPath();
+  fs.mkdirSync(path.dirname(runtimeConfigPath), { recursive: true });
+  fs.writeFileSync(runtimeConfigPath, JSON.stringify(nextConfig, null, 2));
+}
+
+function isOptionalGpuBackendInstalled() {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  return fs.existsSync(getPackagedBackendExecutablePath(BACKEND_RUNTIME_GPU));
+}
+
+function resolvePackagedRuntimeVariant(requestedVariant = null) {
+  const normalizedRequestedVariant = requestedVariant === BACKEND_RUNTIME_GPU
+    ? BACKEND_RUNTIME_GPU
+    : requestedVariant === BACKEND_RUNTIME_CPU
+      ? BACKEND_RUNTIME_CPU
+      : null;
+  const runtimeConfig = readRuntimeConfig();
+  const configuredVariant = normalizedRequestedVariant || runtimeConfig.preferredRuntimeVariant;
+  if (configuredVariant === BACKEND_RUNTIME_GPU && isOptionalGpuBackendInstalled()) {
+    return BACKEND_RUNTIME_GPU;
+  }
+  return BACKEND_RUNTIME_CPU;
 }
 
 /** Test whether a TCP port is currently free on localhost. */
@@ -103,7 +165,7 @@ async function findAvailableBackendPort() {
  *
  * This function is idempotent: if already running, it returns immediately.
  */
-async function startBackendServer() {
+async function startBackendServer(requestedRuntimeVariant = null) {
   if (backendProcess) {
     return;
   }
@@ -119,10 +181,12 @@ async function startBackendServer() {
 
   // Packaged app: run prebuilt backend executable bundled in app resources.
   if (app.isPackaged) {
-    const executablePath = getPackagedBackendExecutablePath();
+    const resolvedRuntimeVariant = resolvePackagedRuntimeVariant(requestedRuntimeVariant);
+    const executablePath = getPackagedBackendExecutablePath(resolvedRuntimeVariant);
     if (!fs.existsSync(executablePath)) {
       throw new Error(`Packaged backend executable not found: ${executablePath}`);
     }
+    backendRuntimeVariant = resolvedRuntimeVariant;
     const backendDataDir = path.join(app.getPath("userData"), "backend");
     const packagedWorkingDirectory = process.resourcesPath;
     const bundledAssetsDir = path.join(process.resourcesPath, "bundled_assets");
@@ -137,10 +201,13 @@ async function startBackendServer() {
         MUSSEL_APP_DATA_DIR: backendDataDir,
         MUSSEL_BUNDLED_ASSETS_DIR: bundledAssetsDir,
         MUSSEL_BASELINE_MODEL_PATH: baselineModelPath,
+        MUSSEL_BACKEND_RUNTIME_VARIANT: backendRuntimeVariant,
+        MUSSEL_OPTIONAL_GPU_RUNTIME_INSTALLED: isOptionalGpuBackendInstalled() ? "1" : "0",
       },
       stdio: "pipe",
     });
   } else {
+    backendRuntimeVariant = BACKEND_RUNTIME_CPU;
     // Development mode: run backend directly with Python + Uvicorn.
     const pythonCommand = getPythonCommand();
     backendProcess = spawn(
@@ -148,7 +215,11 @@ async function startBackendServer() {
       ["-m", "uvicorn", "backend.main:app", "--host", API_HOST, "--port", String(backendPort)],
       {
         cwd: ROOT_DIR,
-        env: process.env,
+        env: {
+          ...process.env,
+          MUSSEL_BACKEND_RUNTIME_VARIANT: backendRuntimeVariant,
+          MUSSEL_OPTIONAL_GPU_RUNTIME_INSTALLED: "0",
+        },
         stdio: "pipe",
       }
     );
@@ -217,6 +288,64 @@ function stopBackendServer() {
   }
 }
 
+async function waitForBackendToStop() {
+  if (!backendProcess) {
+    return;
+  }
+
+  const processToStop = backendProcess;
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    const timeoutId = setTimeout(() => {
+      try {
+        if (!processToStop.killed) {
+          processToStop.kill("SIGKILL");
+        }
+      } catch {
+        // Ignore best-effort shutdown errors.
+      }
+      finish();
+    }, BACKEND_STOP_TIMEOUT_MS);
+
+    processToStop.once("exit", () => {
+      clearTimeout(timeoutId);
+      finish();
+    });
+  });
+}
+
+async function restartBackendServer(requestedRuntimeVariant = null) {
+  stopBackendServer();
+  await waitForBackendToStop();
+  await startBackendServer(requestedRuntimeVariant);
+  await waitForBackendReady();
+}
+
+async function ensureBackendReadyWithFallback() {
+  try {
+    await startBackendServer();
+    await waitForBackendReady();
+  } catch (error) {
+    if (app.isPackaged && resolvePackagedRuntimeVariant() === BACKEND_RUNTIME_GPU) {
+      writeRuntimeConfig({
+        preferredRuntimeVariant: BACKEND_RUNTIME_CPU,
+        lastGpuActivationError: String(error?.message ?? error),
+      });
+      await waitForBackendToStop();
+      await startBackendServer(BACKEND_RUNTIME_CPU);
+      await waitForBackendReady();
+      return;
+    }
+    throw error;
+  }
+}
+
 /** Create the main application window and load the frontend HTML. */
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -247,6 +376,40 @@ ipcMain.handle("backend:base-url", async () => {
 // IPC endpoint: renderer asks if backend is responding.
 ipcMain.handle("backend:is-ready", async () => {
   return isBackendReady();
+});
+
+ipcMain.handle("backend:activate-optional-gpu-runtime", async () => {
+  if (!app.isPackaged) {
+    throw new Error("Optional GPU runtime activation is available only in packaged desktop builds.");
+  }
+  if (process.platform !== "win32") {
+    throw new Error("Optional GPU runtime activation is currently available only on Windows.");
+  }
+  if (!isOptionalGpuBackendInstalled()) {
+    throw new Error("This Windows app build does not include the optional GPU runtime.");
+  }
+
+  const previousConfig = readRuntimeConfig();
+  writeRuntimeConfig({
+    ...previousConfig,
+    preferredRuntimeVariant: BACKEND_RUNTIME_GPU,
+    lastGpuActivationError: "",
+  });
+
+  try {
+    await restartBackendServer(BACKEND_RUNTIME_GPU);
+    return { activated: true };
+  } catch (error) {
+    writeRuntimeConfig({
+      ...previousConfig,
+      preferredRuntimeVariant: BACKEND_RUNTIME_CPU,
+      lastGpuActivationError: String(error?.message ?? error),
+    });
+    await restartBackendServer(BACKEND_RUNTIME_CPU);
+    throw new Error(
+      "The optional GPU runtime could not be started, so the app stayed on CPU. You can keep using the app normally."
+    );
+  }
 });
 
 // IPC endpoint: renderer sends API requests; main process proxies them to backend.
@@ -400,8 +563,7 @@ ipcMain.handle("dialog:pick-images", async () => {
 // 3) create the UI window
 app.whenReady().then(async () => {
   try {
-    await startBackendServer();
-    await waitForBackendReady();
+    await ensureBackendReadyWithFallback();
     createWindow();
   } catch (error) {
     process.stderr.write(`[backend] startup failed: ${String(error)}\n`);

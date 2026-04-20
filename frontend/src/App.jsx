@@ -68,6 +68,7 @@ function App() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [computeStatus, setComputeStatus] = useState(null);
   const [isGpuUpgradePromptOpen, setIsGpuUpgradePromptOpen] = useState(false);
+  const [isActivatingGpuRuntime, setIsActivatingGpuRuntime] = useState(false);
   const [modelRegistrationForm, setModelRegistrationForm] = useState({
     source_model_path: "",
     selected_model_file_name: "",
@@ -339,7 +340,7 @@ function App() {
           isMounted &&
           nextSettings &&
           !nextSettings.gpu_upgrade_prompt_seen &&
-          nextComputeStatus?.compatible_gpu_detected
+          nextComputeStatus?.can_offer_gpu_upgrade
         ) {
           setIsGpuUpgradePromptOpen(true);
         }
@@ -653,20 +654,24 @@ function App() {
     return loadComputeStatus();
   }, [apiPatch, loadComputeStatus]);
 
-  const onEnableGpuPreference = useCallback(async () => {
+  const onActivateGpuRuntime = useCallback(async () => {
     try {
+      setIsActivatingGpuRuntime(true);
+      if (!window.desktopAPI.activateOptionalGpuRuntime) {
+        throw new Error("This app build does not support optional GPU runtime activation.");
+      }
+      await window.desktopAPI.activateOptionalGpuRuntime();
       const nextComputeStatus = await updateComputePreference("gpu_if_available", true);
       setIsGpuUpgradePromptOpen(false);
       if (nextComputeStatus?.gpu_runtime_ready) {
-        showStatus("GPU preference enabled. The app will use the GPU when possible.", "info");
+        showStatus("Optional GPU runtime enabled. The app will use the GPU when possible.", "info");
       } else {
-        showStatus(
-          "GPU preference saved. This app build will continue on CPU until optional GPU runtime support is installed.",
-          "info",
-        );
+        showStatus("The GPU backend was enabled, but this computer is still using the CPU right now.", "info");
       }
     } catch (error) {
       showErrorStatus(error);
+    } finally {
+      setIsActivatingGpuRuntime(false);
     }
   }, [showErrorStatus, showStatus, updateComputePreference]);
 
@@ -702,8 +707,15 @@ function App() {
         fine_tune_num_epochs: String(nextSettings.fine_tune_num_epochs || payload.fine_tune_num_epochs),
         compute_mode: nextSettings.compute_mode || payload.compute_mode,
       });
-      await loadComputeStatus();
-      showStatus("Settings saved.", "info");
+      const nextComputeStatus = await loadComputeStatus();
+      if (
+        (nextSettings.compute_mode || payload.compute_mode) === "gpu_if_available" &&
+        nextComputeStatus?.can_offer_gpu_upgrade
+      ) {
+        showStatus("Compute mode saved. Enable the optional GPU runtime below when you are ready to use the GPU.", "info");
+      } else {
+        showStatus("Settings saved.", "info");
+      }
       await loadModelRegistry();
     } catch (error) {
       showErrorStatus(error);
@@ -1127,7 +1139,7 @@ function App() {
                 </p>
               ) : (
                 <p className="helper usage-copy">
-                  This current build still runs on CPU, but saving the GPU preference now prepares the app for the optional GPU-enabled installer workflow later.
+                  This Windows build includes an optional GPU runtime. If you enable it now, the app will switch to the GPU-enabled backend and keep CPU fallback available.
                 </p>
               )}
               {computeStatus?.detected_gpu_name ? (
@@ -1140,8 +1152,8 @@ function App() {
               <button className="ghost" onClick={onKeepCpuForNow}>
                 Keep CPU for Now
               </button>
-              <button className="primary" onClick={onEnableGpuPreference}>
-                Enable GPU Preference
+              <button className="primary" onClick={onActivateGpuRuntime} disabled={isActivatingGpuRuntime}>
+                {isActivatingGpuRuntime ? "Enabling GPU Runtime..." : "Enable GPU Runtime"}
               </button>
             </div>
           </div>
@@ -1210,6 +1222,8 @@ function App() {
         onChangeSetting={onChangeAppSetting}
         onSaveSettings={onSaveSettings}
         isSavingSettings={isSavingSettings}
+        onActivateGpuRuntime={onActivateGpuRuntime}
+        isActivatingGpuRuntime={isActivatingGpuRuntime}
       />
 
       <UsageView

@@ -22,6 +22,8 @@ function SettingsView({
   onChangeSetting,
   onSaveSettings,
   isSavingSettings,
+  onActivateGpuRuntime,
+  isActivatingGpuRuntime,
 }) {
   return (
     <section id="settings-view" className={`view${visible ? "" : " hidden"}`}>
@@ -181,10 +183,16 @@ function SettingsView({
                   Preferred mode: <strong>{formatComputeModeLabel(settings.compute_mode)}</strong>
                 </p>
                 <p className="settings-compute-line">
+                  Active runtime: <strong>{computeStatus?.backend_runtime_variant === "gpu" ? "GPU-enabled backend" : "CPU backend"}</strong>
+                </p>
+                <p className="settings-compute-line">
                   Active device: <strong>{computeStatus?.effective_device === "cuda" ? "GPU" : "CPU"}</strong>
                 </p>
                 <p className="settings-compute-line">
                   Compatible GPU detected: <strong>{computeStatus?.compatible_gpu_detected ? (computeStatus.detected_gpu_name || "Yes") : "No"}</strong>
+                </p>
+                <p className="settings-compute-line">
+                  Optional GPU runtime installed: <strong>{computeStatus?.optional_gpu_runtime_installed ? "Yes" : "No"}</strong>
                 </p>
                 <p className="settings-compute-line">
                   GPU runtime ready: <strong>{computeStatus?.gpu_runtime_ready ? "Yes" : "No"}</strong>
@@ -197,9 +205,16 @@ function SettingsView({
             <p className="helper">
               Current saved setting: {formatComputeModeLabel(settings.compute_mode)}.
             </p>
-            <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings}>
-              {isSavingSettings ? "Saving..." : "Save Settings"}
-            </button>
+            <div className="button-row">
+              {computeStatus?.can_offer_gpu_upgrade ? (
+                <button className="ghost" onClick={onActivateGpuRuntime} disabled={isActivatingGpuRuntime || isSavingSettings}>
+                  {isActivatingGpuRuntime ? "Enabling GPU Runtime..." : "Enable Optional GPU Runtime"}
+                </button>
+              ) : null}
+              <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings || isActivatingGpuRuntime}>
+                {isSavingSettings ? "Saving..." : "Save Settings"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

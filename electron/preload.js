@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("desktopAPI", {
   pickImagePaths: () => ipcRenderer.invoke("dialog:pick-images"),
   pickModelFile: () => ipcRenderer.invoke("dialog:pick-model"),
   pickDatasetZipFile: () => ipcRenderer.invoke("dialog:pick-dataset-zip"),
+  activateOptionalGpuRuntime: () => ipcRenderer.invoke("backend:activate-optional-gpu-runtime"),
   openExternalUrl: (url) => ipcRenderer.invoke("shell:open-external", { url }),
   downloadBackendFile: (apiPath, defaultFileName) =>
     ipcRenderer.invoke("backend:download-file", { apiPath, defaultFileName }),

@@ -3,6 +3,7 @@ installed."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,8 +12,13 @@ import sys
 # Keep build paths relative to this file so command behavior is stable from any current working directory.
 BACKEND_DIRECTORY = Path(__file__).resolve().parent
 SERVER_ENTRY = BACKEND_DIRECTORY / "server_entry.py"
-DIST_DIRECTORY = BACKEND_DIRECTORY / "dist"
-BUILD_DIRECTORY = BACKEND_DIRECTORY / "build"
+EXECUTABLE_NAME = os.getenv("MUSSEL_BACKEND_EXECUTABLE_NAME", "mussel-backend")
+DIST_DIRECTORY = Path(
+    os.getenv("MUSSEL_BACKEND_DIST_DIR", str(BACKEND_DIRECTORY / "dist"))
+).expanduser().resolve()
+BUILD_DIRECTORY = Path(
+    os.getenv("MUSSEL_BACKEND_BUILD_DIR", str(BACKEND_DIRECTORY / "build"))
+).expanduser().resolve()
 SPEC_DIRECTORY = BACKEND_DIRECTORY
 SCHEMA_PATH = BACKEND_DIRECTORY / "schema.sql"
 
@@ -32,7 +38,7 @@ def build_backend_executable() -> None:
         "--clean",
         "--onefile",
         "--name",
-        "mussel-backend",
+        EXECUTABLE_NAME,
         "--distpath",
         str(DIST_DIRECTORY),
         "--workpath",

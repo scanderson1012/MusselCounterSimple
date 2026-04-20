@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import shutil
 import subprocess
 from typing import Any
@@ -24,24 +25,30 @@ VALID_COMPUTE_MODES = {
 class ComputeStatus:
     preferred_mode: str
     effective_device: str
+    backend_runtime_variant: str
     torch_cuda_available: bool
     torch_version: str
     torch_cuda_version: str | None
     compatible_gpu_detected: bool
     detected_gpu_name: str | None
     gpu_runtime_ready: bool
+    optional_gpu_runtime_installed: bool
+    gpu_upgrade_available: bool
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "preferred_mode": self.preferred_mode,
             "effective_device": self.effective_device,
+            "backend_runtime_variant": self.backend_runtime_variant,
             "torch_cuda_available": self.torch_cuda_available,
             "torch_version": self.torch_version,
             "torch_cuda_version": self.torch_cuda_version,
             "compatible_gpu_detected": self.compatible_gpu_detected,
             "detected_gpu_name": self.detected_gpu_name,
             "gpu_runtime_ready": self.gpu_runtime_ready,
-            "can_offer_gpu_upgrade": self.compatible_gpu_detected and not self.gpu_runtime_ready,
+            "optional_gpu_runtime_installed": self.optional_gpu_runtime_installed,
+            "gpu_upgrade_available": self.gpu_upgrade_available,
+            "can_offer_gpu_upgrade": self.gpu_upgrade_available,
         }
 
 
@@ -75,15 +82,28 @@ def get_compute_status(preferred_mode: str) -> ComputeStatus:
     detected_gpu_name = _detect_compatible_gpu_name()
     torch_cuda_available = bool(torch.cuda.is_available())
     effective_device = resolve_torch_device(normalized_mode).type
+    backend_runtime_variant = _get_backend_runtime_variant()
+    optional_gpu_runtime_installed = parse_bool_setting(
+        os.getenv("MUSSEL_OPTIONAL_GPU_RUNTIME_INSTALLED", "0"),
+        False,
+    )
+    gpu_upgrade_available = (
+        bool(detected_gpu_name)
+        and optional_gpu_runtime_installed
+        and backend_runtime_variant != "gpu"
+    )
     return ComputeStatus(
         preferred_mode=normalized_mode,
         effective_device=effective_device,
+        backend_runtime_variant=backend_runtime_variant,
         torch_cuda_available=torch_cuda_available,
         torch_version=str(torch.__version__),
         torch_cuda_version=torch.version.cuda,
         compatible_gpu_detected=bool(detected_gpu_name),
         detected_gpu_name=detected_gpu_name,
         gpu_runtime_ready=torch_cuda_available,
+        optional_gpu_runtime_installed=optional_gpu_runtime_installed,
+        gpu_upgrade_available=gpu_upgrade_available,
     )
 
 
@@ -106,3 +126,8 @@ def _detect_compatible_gpu_name() -> str | None:
 
     gpu_names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     return gpu_names[0] if gpu_names else None
+
+
+def _get_backend_runtime_variant() -> str:
+    runtime_variant = str(os.getenv("MUSSEL_BACKEND_RUNTIME_VARIANT", "cpu")).strip().lower()
+    return runtime_variant if runtime_variant in {"cpu", "gpu"} else "cpu"
