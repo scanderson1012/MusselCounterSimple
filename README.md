@@ -1,7 +1,7 @@
 # Mussel Counter
 Download: https://github.com/natewill/MusselCounterSimple/releases/tag/v0.1.0
 
-Made by Team Mussel Memory: Nate Williams, Austin Ashley, Fernando Gomez, and Siddharth Rakshit for a CMDA capstone project under the Virginia Tech Department of Fish and Wildlife Conservation.
+Made by the CMDA Capstone Fall 2025 and Spring 2026 teams for a CMDA capstone project under the Virginia Tech Department of Fish and Wildlife Conservation.
 
 <img src="docs/sponsor-advisor.png" alt="Sponsor and Advisor" width="700" />
 
@@ -79,14 +79,72 @@ Current limitation:
 
 - macOS currently runs on CPU only. Optional GPU runtime support is implemented for Windows only.
 
+## Build From This Repository
+
+If you are building the app yourself instead of downloading a release asset, do these steps first:
+
+1. Install Python 3.
+2. Install Node.js 20 or newer.
+3. Download or clone this repository to your computer.
+4. Open a terminal in the repository root folder.
+
+The repository root folder is the folder that contains:
+
+- `package.json`
+- `backend`
+- `frontend`
+- `electron`
+
+All build commands in this README should be run from that repository root folder.
+
+### Install Python And Node.js First
+
+If you have never used Python before, do this before running any commands below.
+
+#### Windows
+
+1. Install Python 3 from: `https://www.python.org/downloads/windows/`
+2. During the Python installer, make sure you check the box:
+   `Add Python to PATH`
+3. Finish the Python installation.
+4. Install Node.js 20 or newer from: `https://nodejs.org/`
+5. Open a new PowerShell window after both installs finish.
+
+#### macOS
+
+1. Install Python 3 from: `https://www.python.org/downloads/macos/`
+2. Install Node.js 20 or newer from: `https://nodejs.org/`
+3. Open a new Terminal window after both installs finish.
+
+### Clone The Repository
+
+Use one of these two options:
+
+#### Option 1: Clone with Git
+
+If you already have Git installed, run:
+
+```bash
+git clone https://github.com/scanderson1012/MusselCounterSimple.git
+cd MusselCounterSimple
+```
+
+#### Option 2: Download the ZIP
+
+1. Open: `https://github.com/scanderson1012/MusselCounterSimple`
+2. Click the green `Code` button.
+3. Click `Download ZIP`.
+4. Extract the ZIP.
+5. Open a terminal inside the extracted `MusselCounterSimple` folder.
+
 ## Run Locally (Development on macOS/Linux)
 
 ### Download Everything
 
 ```bash
-# while in /MusselCounterSimple
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 npm ci
 ```
@@ -102,9 +160,9 @@ npm start
 ### Download Everything
 
 ```powershell
-# while in /MusselCounterSimple
 py -3 -m venv .venv
 .\.venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 npm ci
 ```
@@ -120,9 +178,9 @@ npm start
 ### Build macOS `.dmg` (on macOS)
 
 ```bash
-# while in /MusselCounterSimple
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
 npm run make:desktop:mac -- --arch=arm64
@@ -132,12 +190,19 @@ find out/make -name "*.dmg"
 ### Build Windows `.zip` (Portable, on Windows)
 
 ```powershell
-# while in /MusselCounterSimple
 py -3 -m venv .venv
 .\.venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
 npm run make:desktop:win
+```
+
+If PowerShell blocks `npm` with an `npm.ps1 cannot be loaded because running scripts is disabled on this system` error, use `npm.cmd` instead:
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" ci
+& "C:\Program Files\nodejs\npm.cmd" run make:desktop:win
 ```
 
 Windows ZIP output will be under:
@@ -147,6 +212,8 @@ out\make\zip\win32\...
 ```
 
 To use it, extract the ZIP on Windows and run `mussel-counter-simple.exe` from the extracted folder.
+
+To create a desktop shortcut on Windows, right-click `mussel-counter-simple.exe` and choose `Send to` -> `Desktop (create shortcut)`. Keep the full extracted app folder together and do not move only the `.exe` by itself.
 
 ### Optional Windows GPU Runtime Build
 

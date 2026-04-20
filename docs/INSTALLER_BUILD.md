@@ -1,5 +1,50 @@
 # Installer Build Guide
 
+Start by installing Python 3 and Node.js 20+, then download or clone this repository, then open a terminal in the repository root folder before running any commands.
+
+The repository root folder is the folder that contains:
+
+- `package.json`
+- `backend`
+- `frontend`
+- `electron`
+
+## Install Python And Node.js First
+
+If you have never used Python before, do this before running any build commands.
+
+### Windows
+
+1. Install Python 3 from: `https://www.python.org/downloads/windows/`
+2. During the Python installer, check:
+   `Add Python to PATH`
+3. Finish the Python installation.
+4. Install Node.js 20 or newer from: `https://nodejs.org/`
+5. Open a new PowerShell window after installation.
+
+### macOS
+
+1. Install Python 3 from: `https://www.python.org/downloads/macos/`
+2. Install Node.js 20 or newer from: `https://nodejs.org/`
+3. Open a new Terminal window after installation.
+
+## Clone Or Download The Repository
+
+### Option 1: Clone with Git
+
+```bash
+git clone https://github.com/scanderson1012/MusselCounterSimple.git
+cd MusselCounterSimple
+```
+
+### Option 2: Download the ZIP
+
+1. Open: `https://github.com/scanderson1012/MusselCounterSimple`
+2. Click the green `Code` button.
+3. Click `Download ZIP`.
+4. Extract the ZIP.
+5. Open a terminal inside the extracted `MusselCounterSimple` folder.
+
 This project ships as:
 
 - Windows 10/11 portable ZIP
@@ -18,10 +63,19 @@ Build this on Windows.
 ```powershell
 py -3 -m venv .venv-build-cpu
 .\.venv-build-cpu\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
 npm run backend:build:cpu
 npm run make:desktop:win
+```
+
+If PowerShell blocks `npm` with an `npm.ps1 cannot be loaded because running scripts is disabled on this system` error, use `npm.cmd` instead:
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" ci
+& "C:\Program Files\nodejs\npm.cmd" run backend:build:cpu
+& "C:\Program Files\nodejs\npm.cmd" run make:desktop:win
 ```
 
 Output:
@@ -34,11 +88,20 @@ out\make\zip\win32\...
 
 Build this on Windows. The packaged app still starts on CPU by default, but it also includes a second optional GPU backend that can be activated from the first-launch GPU prompt or later from Settings.
 
+You do not have to build the CPU and GPU versions at the same time. For example, you can:
+
+1. build and package a CPU-only Windows version first,
+2. come back later and build the GPU backend,
+3. run the Windows packaging command again.
+
+When you re-run the packaging command after `backend/dist_gpu/` exists, the new Windows package will include both the default CPU backend and the optional GPU backend.
+
 ### 1. Build the CPU backend
 
 ```powershell
 py -3 -m venv .venv-build-cpu
 .\.venv-build-cpu\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
 npm run backend:build:cpu
@@ -50,6 +113,7 @@ deactivate
 ```powershell
 py -3 -m venv .venv-build-gpu
 .\.venv-build-gpu\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements-gpu-win.txt -r requirements-build.txt
 npm run backend:build:gpu:win
 deactivate
@@ -71,6 +135,7 @@ Build this on macOS.
 ```bash
 python3 -m venv .venv-build-mac
 source .venv-build-mac/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt -r requirements-build.txt
 npm ci
 npm run backend:build:cpu

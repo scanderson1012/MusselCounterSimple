@@ -1276,7 +1276,7 @@ function App() {
       />
 
       <footer className="app-credit">
-        Made by Nate Williams, Austin Ashley, Fernando Gomez, Siddharth Rakshit
+        CMDA Capstone Fall 2025 and Spring 2026 teams
       </footer>
 
       <DetectionModal
