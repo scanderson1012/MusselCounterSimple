@@ -56,13 +56,13 @@ function App() {
   const [modelReport, setModelReport] = useState(null);
   const [appSettings, setAppSettings] = useState({
     fine_tune_min_new_images: 10,
-    fine_tune_num_epochs: 5,
+    fine_tune_num_epochs: 10,
     compute_mode: "automatic",
     gpu_upgrade_prompt_seen: false,
   });
   const [draftAppSettings, setDraftAppSettings] = useState({
     fine_tune_min_new_images: "10",
-    fine_tune_num_epochs: "5",
+    fine_tune_num_epochs: "10",
     compute_mode: "automatic",
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -71,6 +71,8 @@ function App() {
   const [modelRegistrationForm, setModelRegistrationForm] = useState({
     source_model_path: "",
     selected_model_file_name: "",
+    dataset_zip_path: "",
+    selected_dataset_zip_file_name: "",
     family_name: "",
     description: "",
     training_images_dir: "",
@@ -81,12 +83,21 @@ function App() {
   });
 
   const toErrorMessage = useCallback((error) => {
-    const rawMessage = String(error?.message ?? error ?? "");
-    const requestFailureMatch = rawMessage.match(/^Request failed \([^)]+\):\s*(.+)$/);
-    if (requestFailureMatch) {
-      return requestFailureMatch[1];
+    let message = String(error?.message ?? error ?? "").trim();
+
+    const remoteMethodMatch = message.match(
+      /^Error invoking remote method ['"][^'"]+['"]:\s*Error:\s*(.+)$/i
+    );
+    if (remoteMethodMatch) {
+      message = remoteMethodMatch[1].trim();
     }
-    return rawMessage;
+
+    const requestFailureMatch = message.match(/^Request failed \([^)]+\):\s*(.+)$/);
+    if (requestFailureMatch) {
+      message = requestFailureMatch[1].trim();
+    }
+
+    return message;
   }, []);
   const goToRoute = useCallback((targetRoute) => {
     const currentRoute = window.location.hash.replace(/^#/, "");
@@ -175,7 +186,7 @@ function App() {
     const nextSettings = response.settings || {};
     const normalizedSettings = {
       fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || 10,
-      fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || 5,
+      fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || 10,
       compute_mode: nextSettings.compute_mode || "automatic",
       gpu_upgrade_prompt_seen: Boolean(nextSettings.gpu_upgrade_prompt_seen),
     };
@@ -719,6 +730,22 @@ function App() {
     }
   }, [showErrorStatus]);
 
+  const onChooseDatasetZipFile = useCallback(async () => {
+    try {
+      const result = await window.desktopAPI.pickDatasetZipFile();
+      if (!result) {
+        return;
+      }
+      setModelRegistrationForm((previousValue) => ({
+        ...previousValue,
+        dataset_zip_path: result.filePath || "",
+        selected_dataset_zip_file_name: result.fileName || "",
+      }));
+    } catch (error) {
+      showErrorStatus(error);
+    }
+  }, [showErrorStatus]);
+
   const onRegisterModel = useCallback(async () => {
     try {
       if (!modelRegistrationForm.source_model_path) {
@@ -730,11 +757,8 @@ function App() {
       if (!modelRegistrationForm.description.trim()) {
         throw new Error("Enter a model description.");
       }
-      if (!modelRegistrationForm.training_images_dir.trim() || !modelRegistrationForm.training_labels_dir.trim()) {
-        throw new Error("Enter both training dataset paths.");
-      }
-      if (!modelRegistrationForm.test_images_dir.trim() || !modelRegistrationForm.test_labels_dir.trim()) {
-        throw new Error("Enter both test dataset paths.");
+      if (!modelRegistrationForm.dataset_zip_path.trim()) {
+        throw new Error("Choose the Roboflow dataset zip file before continuing.");
       }
       setIsSubmittingModel(true);
       const response = await apiPost("/models/register", modelRegistrationForm);
@@ -748,6 +772,8 @@ function App() {
       setModelRegistrationForm({
         source_model_path: "",
         selected_model_file_name: "",
+        dataset_zip_path: "",
+        selected_dataset_zip_file_name: "",
         family_name: "",
         description: "",
         training_images_dir: "",
@@ -888,7 +914,7 @@ function App() {
 
   const onDeleteModelVersion = useCallback(async (version) => {
     const versionNumber = Number(version.version_number || 0);
-    const isBaselineFamily = String(version.family_name || "").toLowerCase() === "fasterrcnn_baseline";
+    const isBaselineFamily = Boolean(version.is_bundled_baseline);
     if (isBaselineFamily && versionNumber <= 1) {
       showStatus("The bundled baseline model v1 cannot be deleted.", "error");
       return;
@@ -918,7 +944,7 @@ function App() {
   }, [apiDelete, loadModelRegistry, loadModels, showErrorStatus, showStatus]);
 
   const onDeleteModelFamily = useCallback(async (family) => {
-    const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
+    const isBaselineFamily = Boolean(family.is_bundled_baseline);
     if (isBaselineFamily) {
       showStatus("The bundled baseline model cannot be deleted.", "error");
       return;
@@ -1161,6 +1187,7 @@ function App() {
         modelForm={modelRegistrationForm}
         onUpdateModelForm={onUpdateModelForm}
         onChooseModelFile={onChooseModelFile}
+        onChooseDatasetZipFile={onChooseDatasetZipFile}
         onRegisterModel={onRegisterModel}
         onDeleteModelVersion={onDeleteModelVersion}
         onDeleteModelFamily={onDeleteModelFamily}

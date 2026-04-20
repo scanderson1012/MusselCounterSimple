@@ -33,12 +33,18 @@ def build_model_report_data(version: dict) -> dict:
         "description": str(version.get("description") or "").strip(),
         "training_dataset": {
             "name": training_name,
+            "dataset_format": str(version.get("training_dataset_format") or "folder_pairs"),
+            "zip_file_path": str(version.get("training_dataset_zip_file_path") or "").strip(),
+            "split_name": str(version.get("training_dataset_split_name") or "").strip(),
             "images_dir": str(version.get("training_images_dir") or "-"),
             "labels_dir": str(version.get("training_labels_dir") or "-"),
             "description": str(version.get("training_dataset_description") or "").strip(),
         },
         "test_dataset": {
             "name": test_name,
+            "dataset_format": str(version.get("test_dataset_format") or "folder_pairs"),
+            "zip_file_path": str(version.get("test_dataset_zip_file_path") or "").strip(),
+            "split_name": str(version.get("test_dataset_split_name") or "").strip(),
             "images_dir": str(version.get("test_images_dir") or "-"),
             "labels_dir": str(version.get("test_labels_dir") or "-"),
             "description": str(version.get("test_dataset_description") or "").strip(),
@@ -106,6 +112,9 @@ def render_model_report_html(report: dict) -> str:
     <div class="card">
       <h3>Training Dataset</h3>
       <p><strong>Name:</strong> {escape(report["training_dataset"]["name"])}</p>
+      <p><strong>Type:</strong> {escape(_format_dataset_type(report["training_dataset"]["dataset_format"]))}</p>
+      <p><strong>Zip File:</strong> {escape(report["training_dataset"]["zip_file_path"] or "-")}</p>
+      <p><strong>Split:</strong> {escape(report["training_dataset"]["split_name"] or "-")}</p>
       <p><strong>Images:</strong> {escape(report["training_dataset"]["images_dir"])}</p>
       <p><strong>Labels:</strong> {escape(report["training_dataset"]["labels_dir"])}</p>
       <p class="prewrap">{escape(report["training_dataset"]["description"] or "No dataset description provided.")}</p>
@@ -113,6 +122,9 @@ def render_model_report_html(report: dict) -> str:
     <div class="card">
       <h3>Test Dataset</h3>
       <p><strong>Name:</strong> {escape(report["test_dataset"]["name"])}</p>
+      <p><strong>Type:</strong> {escape(_format_dataset_type(report["test_dataset"]["dataset_format"]))}</p>
+      <p><strong>Zip File:</strong> {escape(report["test_dataset"]["zip_file_path"] or "-")}</p>
+      <p><strong>Split:</strong> {escape(report["test_dataset"]["split_name"] or "-")}</p>
       <p><strong>Images:</strong> {escape(report["test_dataset"]["images_dir"])}</p>
       <p><strong>Labels:</strong> {escape(report["test_dataset"]["labels_dir"])}</p>
       <p class="prewrap">{escape(report["test_dataset"]["description"] or "No dataset description provided.")}</p>
@@ -200,12 +212,18 @@ def _build_pdf_lines(report: dict) -> list[str]:
         "",
         "Training Dataset",
         f"Name: {report['training_dataset']['name']}",
+        f"Type: {_format_dataset_type(report['training_dataset']['dataset_format'])}",
+        f"Zip File: {report['training_dataset']['zip_file_path'] or '-'}",
+        f"Split: {report['training_dataset']['split_name'] or '-'}",
         f"Images: {report['training_dataset']['images_dir']}",
         f"Labels: {report['training_dataset']['labels_dir']}",
         report["training_dataset"]["description"] or "No dataset description provided.",
         "",
         "Test Dataset",
         f"Name: {report['test_dataset']['name']}",
+        f"Type: {_format_dataset_type(report['test_dataset']['dataset_format'])}",
+        f"Zip File: {report['test_dataset']['zip_file_path'] or '-'}",
+        f"Split: {report['test_dataset']['split_name'] or '-'}",
         f"Images: {report['test_dataset']['images_dir']}",
         f"Labels: {report['test_dataset']['labels_dir']}",
         report["test_dataset"]["description"] or "No dataset description provided.",
@@ -257,6 +275,13 @@ def _metric_chip(label: str, value: str) -> str:
         f"<div class='metric-chip-value'>{escape(value)}</div>"
         "</div>"
     )
+
+
+def _format_dataset_type(raw_value: str) -> str:
+    normalized = str(raw_value or "folder_pairs").strip().lower()
+    if normalized == "roboflow_zip":
+        return "Roboflow Zip"
+    return "Images + Labels Folders"
 
 
 def _build_requested_metrics(report: dict) -> dict[str, str]:

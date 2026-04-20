@@ -45,6 +45,7 @@ function ModelsView({
   modelForm,
   onUpdateModelForm,
   onChooseModelFile,
+  onChooseDatasetZipFile,
   onRegisterModel,
   onDeleteModelVersion,
   onDeleteModelFamily,
@@ -80,14 +81,14 @@ function ModelsView({
           />
         </div>
         <p className="helper">
-          Click <strong>Add Model</strong>, choose a `.pth` or `.pt` model file, then enter a model name, a clear description,
-          and the folder paths for the images and labels used to train and test it.
+          Click <strong>Add Model</strong>, choose a `.pth` or `.pt` model file, then choose the Roboflow dataset `.zip`
+          used to train and test it, and enter a model name and clear description.
         </p>
         <p className="helper">
           The description should explain what the model is for, what kinds of images it fits, and when someone should use it.
         </p>
         <p className="helper">
-          After you save it, the app stores the model and its folder information. The test only runs when you click
+          After you save it, the app stores the model and its dataset information. The test only runs when you click
           <strong> Evaluate on Test Set</strong> for that version.
         </p>
       </div>
@@ -99,7 +100,7 @@ function ModelsView({
           modelFamilies.map((family) => (
             <article key={family.id} className="panel model-family-card">
               {(() => {
-                const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
+                const isBaselineFamily = Boolean(family.is_bundled_baseline);
                 return (
               <div className="model-family-header">
                 <div>
@@ -117,7 +118,7 @@ function ModelsView({
 
                 <div className="model-version-list">
                   {family.versions.map((version) => {
-                    const isBaselineFamily = String(family.name || "").toLowerCase() === "fasterrcnn_baseline";
+                    const isBaselineFamily = Boolean(version.is_bundled_baseline ?? family.is_bundled_baseline);
                     const canDeleteVersion = !isBaselineFamily || Number(version.version_number || 0) > 1;
                     return (
                       <div key={version.id} className="model-version-row">
@@ -237,6 +238,26 @@ function ModelsView({
               </div>
 
               <div className="field">
+                <label className="label-with-help">
+                  <span>Dataset Zip File</span>
+                  <HelpTooltip
+                    title="Dataset zip file"
+                    wide
+                    content={[
+                      "Choose the Roboflow export zip used to make this model.",
+                      "The zip should contain train and test folders with images and matching Pascal VOC XML files.",
+                    ]}
+                  />
+                </label>
+                <button className="ghost modal-wide-btn" onClick={onChooseDatasetZipFile}>
+                  {modelForm.selected_dataset_zip_file_name || "Choose dataset .zip file"}
+                </button>
+                <p className="helper">
+                  The app reads the train and test folders directly from this zip file when it needs to evaluate or fine-tune the model.
+                </p>
+              </div>
+
+              <div className="field">
                 <label htmlFor="model-family-name" className="label-with-help">
                   <span>Model Name</span>
                   <HelpTooltip
@@ -279,85 +300,6 @@ function ModelsView({
                 <p className="helper">
                   Include what the model looks for, what kinds of images it works well on, and when someone should use it.
                 </p>
-              </div>
-
-              <div className="models-register-grid">
-                <div className="field">
-                  <label htmlFor="training-images-dir" className="label-with-help">
-                    <span>Training Images Folder Path</span>
-                    <HelpTooltip
-                      title="Training images folder"
-                      wide
-                      content={[
-                        "Enter the folder path for the images used to make this model.",
-                        "This helps people know where the model came from.",
-                      ]}
-                    />
-                  </label>
-                  <input
-                    id="training-images-dir"
-                    type="text"
-                    value={modelForm.training_images_dir}
-                    onChange={(event) => onUpdateModelForm("training_images_dir", event.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="training-labels-dir" className="label-with-help">
-                    <span>Training Labels Folder Path</span>
-                    <HelpTooltip
-                      title="Training labels folder"
-                      wide
-                      content={[
-                        "Enter the folder path for the labels that match the training images.",
-                        "This is saved as part of the model's record.",
-                      ]}
-                    />
-                  </label>
-                  <input
-                    id="training-labels-dir"
-                    type="text"
-                    value={modelForm.training_labels_dir}
-                    onChange={(event) => onUpdateModelForm("training_labels_dir", event.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="test-images-dir" className="label-with-help">
-                    <span>Test Images Folder Path</span>
-                    <HelpTooltip
-                      title="Test images folder"
-                      wide
-                      content={[
-                        "Enter the folder path for the images used to test this model.",
-                        "These should be separate from the images used to make the model.",
-                      ]}
-                    />
-                  </label>
-                  <input
-                    id="test-images-dir"
-                    type="text"
-                    value={modelForm.test_images_dir}
-                    onChange={(event) => onUpdateModelForm("test_images_dir", event.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="test-labels-dir" className="label-with-help">
-                    <span>Test Labels Folder Path</span>
-                    <HelpTooltip
-                      title="Test labels folder"
-                      wide
-                      content={[
-                        "Enter the folder path for the labels that match the test images.",
-                        "The app uses these when it tests the model.",
-                      ]}
-                    />
-                  </label>
-                  <input
-                    id="test-labels-dir"
-                    type="text"
-                    value={modelForm.test_labels_dir}
-                    onChange={(event) => onUpdateModelForm("test_labels_dir", event.target.value)}
-                  />
-                </div>
               </div>
 
               <div className="field">
@@ -403,6 +345,9 @@ function ModelsView({
               <section className="model-report-section">
                 <p className="model-report-eyebrow">Training Dataset</p>
                 <p className="helper model-report-copy"><strong>Name:</strong> {modelReport.training_dataset.name}</p>
+                <p className="helper model-report-copy"><strong>Type:</strong> {modelReport.training_dataset.dataset_format === "roboflow_zip" ? "Roboflow Zip" : "Images + Labels Folders"}</p>
+                <p className="helper model-report-copy"><strong>Zip:</strong> {modelReport.training_dataset.zip_file_path || "-"}</p>
+                <p className="helper model-report-copy"><strong>Split:</strong> {modelReport.training_dataset.split_name || "-"}</p>
                 <p className="helper model-report-copy"><strong>Images:</strong> {modelReport.training_dataset.images_dir}</p>
                 <p className="helper model-report-copy"><strong>Labels:</strong> {modelReport.training_dataset.labels_dir}</p>
               </section>
@@ -410,6 +355,9 @@ function ModelsView({
               <section className="model-report-section">
                 <p className="model-report-eyebrow">Test Dataset</p>
                 <p className="helper model-report-copy"><strong>Name:</strong> {modelReport.test_dataset.name}</p>
+                <p className="helper model-report-copy"><strong>Type:</strong> {modelReport.test_dataset.dataset_format === "roboflow_zip" ? "Roboflow Zip" : "Images + Labels Folders"}</p>
+                <p className="helper model-report-copy"><strong>Zip:</strong> {modelReport.test_dataset.zip_file_path || "-"}</p>
+                <p className="helper model-report-copy"><strong>Split:</strong> {modelReport.test_dataset.split_name || "-"}</p>
                 <p className="helper model-report-copy"><strong>Images:</strong> {modelReport.test_dataset.images_dir}</p>
                 <p className="helper model-report-copy"><strong>Labels:</strong> {modelReport.test_dataset.labels_dir}</p>
               </section>

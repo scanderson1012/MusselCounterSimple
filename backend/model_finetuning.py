@@ -8,9 +8,7 @@ from typing import Any
 import random
 import xml.etree.ElementTree as ET
 
-import albumentations as A
 import numpy as np
-from albumentations.pytorch import ToTensorV2
 from PIL import Image
 import torch
 from torch.utils.data import ConcatDataset
@@ -20,9 +18,19 @@ from torch.utils.data import Subset
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 from backend.compute import resolve_torch_device
+from backend.dataset_sources import create_dataset_source
+from backend.dataset_sources import list_pascal_voc_samples
 from backend.model_execution import _SUPPORTED_ARCHS
-
-VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+from backend.training_config import BATCH_SIZE
+from backend.training_config import GRAD_CLIP_NORM
+from backend.training_config import LEARNING_RATE
+from backend.training_config import NUM_EPOCHS
+from backend.training_config import NUM_WORKERS
+from backend.training_config import SEED
+from backend.training_config import WEIGHT_DECAY
+from backend.training_config import build_training_sample
+from backend.training_config import get_train_transforms
+from backend.training_config import normalize_loaded_state_dict
 
 
 @dataclass(slots=True)
@@ -32,44 +40,31 @@ class FineTuneConfig:
     architecture: str
     num_classes: int
     class_mapping: dict[str, str]
-    base_train_images_dir: str
-    base_train_labels_dir: str
+    base_train_dataset: dict[str, Any]
     replay_history_images: list[dict[str, Any]]
     replay_history_detections: dict[int, list[dict[str, Any]]]
     new_replay_images: list[dict[str, Any]]
     new_replay_detections: dict[int, list[dict[str, Any]]]
-    num_epochs: int = 5
-    image_size: int = 640
-    learning_rate: float = 1e-4
-    weight_decay: float = 1e-4
-    batch_size: int = 4
-    num_workers: int = 0
-    freeze_backbone: bool = True
-    seed: int = 42
+    num_epochs: int = NUM_EPOCHS
+    learning_rate: float = LEARNING_RATE
+    weight_decay: float = WEIGHT_DECAY
+    batch_size: int = BATCH_SIZE
+    num_workers: int = NUM_WORKERS
+    seed: int = SEED
 
 
 class PascalVOCDataset(Dataset):
-    """Pascal VOC dataset loaded from image/XML directories."""
+    """Pascal VOC dataset loaded from image/XML sample pairs."""
 
     def __init__(
         self,
-        images_dir: str,
-        labels_dir: str,
+        samples: list[tuple[Path, Path]],
         class_name_to_id: dict[str, int],
-        transforms: A.Compose | None,
+        transforms,
     ) -> None:
-        self.images_dir = Path(images_dir)
-        self.labels_dir = Path(labels_dir)
+        self.samples = samples
         self.class_name_to_id = class_name_to_id
         self.transforms = transforms
-        self.samples: list[tuple[Path, Path]] = []
-
-        for image_path in sorted(self.images_dir.iterdir()):
-            if not image_path.is_file() or image_path.suffix.lower() not in VALID_IMAGE_EXTENSIONS:
-                continue
-            label_path = self.labels_dir / f"{image_path.stem}.xml"
-            if label_path.is_file():
-                self.samples.append((image_path, label_path))
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -78,7 +73,7 @@ class PascalVOCDataset(Dataset):
         image_path, label_path = self.samples[index]
         image = np.array(Image.open(image_path).convert("RGB"))
         boxes, labels = _parse_pascal_voc_xml(label_path, self.class_name_to_id)
-        return _build_training_sample(
+        return build_training_sample(
             image=image,
             boxes=boxes,
             labels=labels,
@@ -95,7 +90,7 @@ class ReplayBufferSnapshotDataset(Dataset):
         image_rows: list[dict[str, Any]],
         detections_by_image_id: dict[int, list[dict[str, Any]]],
         class_name_to_id: dict[str, int],
-        transforms: A.Compose | None,
+        transforms,
     ) -> None:
         self.image_rows = image_rows
         self.detections_by_image_id = detections_by_image_id
@@ -124,7 +119,7 @@ class ReplayBufferSnapshotDataset(Dataset):
                 continue
             boxes.append([xmin, ymin, xmax, ymax])
             labels.append(class_id)
-        return _build_training_sample(
+        return build_training_sample(
             image=image,
             boxes=boxes,
             labels=labels,
@@ -151,11 +146,17 @@ def run_fine_tuning(
     _set_seed(config.seed)
     _validate_fine_tune_inputs(config)
 
-    old_train_transforms = _get_train_transforms(config.image_size)
-    new_train_transforms = _get_train_transforms(config.image_size)
+    old_train_transforms = get_train_transforms()
+    new_train_transforms = get_train_transforms()
+    base_train_source = create_dataset_source(
+        images_dir=str(config.base_train_dataset.get("images_dir") or ""),
+        labels_dir=str(config.base_train_dataset.get("labels_dir") or ""),
+        zip_file_path=str(config.base_train_dataset.get("zip_file_path") or ""),
+        split_name=str(config.base_train_dataset.get("split_name") or ""),
+        dataset_format=str(config.base_train_dataset.get("dataset_format") or ""),
+    )
     base_dataset = PascalVOCDataset(
-        images_dir=config.base_train_images_dir,
-        labels_dir=config.base_train_labels_dir,
+        samples=list_pascal_voc_samples(base_train_source),
         class_name_to_id=class_name_to_id,
         transforms=old_train_transforms,
     )
@@ -199,11 +200,16 @@ def run_fine_tuning(
         num_classes=config.num_classes,
         preferred_compute_mode=preferred_compute_mode,
     )
-    trainable_parameters = _configure_trainable_parameters(model, config.freeze_backbone)
+    trainable_parameters = _configure_trainable_parameters(model)
     optimizer = torch.optim.AdamW(
         trainable_parameters,
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=int(config.num_epochs),
+        eta_min=float(config.learning_rate) / 20.0,
     )
 
     if progress_callback is not None:
@@ -230,6 +236,7 @@ def run_fine_tuning(
                 should_cancel_callback=should_cancel_callback,
             )
             epoch_losses.append(average_loss)
+            scheduler.step()
 
         if should_cancel_callback is not None and should_cancel_callback():
             raise RuntimeError("Fine-tuning cancelled by user.")
@@ -281,6 +288,7 @@ def _train_one_epoch(
 
         optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
         optimizer.step()
 
         running_loss += float(total_loss.item())
@@ -295,12 +303,13 @@ def _validate_fine_tune_inputs(config: FineTuneConfig) -> None:
     parent_model_path = Path(config.parent_model_path).expanduser().resolve()
     if not parent_model_path.is_file():
         raise FileNotFoundError(f"Model checkpoint not found: {parent_model_path}")
-    base_train_images_dir = Path(config.base_train_images_dir).expanduser().resolve()
-    base_train_labels_dir = Path(config.base_train_labels_dir).expanduser().resolve()
-    if not base_train_images_dir.is_dir():
-        raise FileNotFoundError(f"Training images directory not found: {base_train_images_dir}")
-    if not base_train_labels_dir.is_dir():
-        raise FileNotFoundError(f"Training labels directory not found: {base_train_labels_dir}")
+    create_dataset_source(
+        images_dir=str(config.base_train_dataset.get("images_dir") or ""),
+        labels_dir=str(config.base_train_dataset.get("labels_dir") or ""),
+        zip_file_path=str(config.base_train_dataset.get("zip_file_path") or ""),
+        split_name=str(config.base_train_dataset.get("split_name") or ""),
+        dataset_format=str(config.base_train_dataset.get("dataset_format") or ""),
+    )
 
 
 def _load_detection_model(
@@ -315,12 +324,7 @@ def _load_detection_model(
 
     device = resolve_torch_device(preferred_compute_mode)
     checkpoint = torch.load(str(Path(model_path).expanduser().resolve()), map_location=device)
-    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-        state_dict = checkpoint["model_state_dict"]
-    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
-        state_dict = checkpoint["state_dict"]
-    else:
-        state_dict = checkpoint
+    state_dict = normalize_loaded_state_dict(checkpoint)
 
     model = builder(weights=None, weights_backbone=None)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
@@ -332,62 +336,8 @@ def _load_detection_model(
 
 def _configure_trainable_parameters(
     model: torch.nn.Module,
-    freeze_backbone: bool,
 ) -> list[torch.nn.Parameter]:
-    if freeze_backbone:
-        for parameter in model.backbone.parameters():
-            parameter.requires_grad = False
     return [parameter for parameter in model.parameters() if parameter.requires_grad]
-
-
-def _build_training_sample(
-    image: np.ndarray,
-    boxes: list[list[float]],
-    labels: list[int],
-    sample_index: int,
-    transforms: A.Compose | None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    boxes_np = np.array(boxes, dtype=np.float32) if boxes else np.zeros((0, 4), dtype=np.float32)
-    labels_np = np.array(labels, dtype=np.int64) if labels else np.zeros((0,), dtype=np.int64)
-
-    if transforms is not None:
-        transformed = transforms(
-            image=image,
-            bboxes=boxes_np.tolist(),
-            labels=labels_np.tolist(),
-        )
-        image_tensor = transformed["image"]
-        boxes_np = (
-            np.array(transformed["bboxes"], dtype=np.float32)
-            if transformed["bboxes"]
-            else np.zeros((0, 4), dtype=np.float32)
-        )
-        labels_np = (
-            np.array(transformed["labels"], dtype=np.int64)
-            if transformed["labels"]
-            else np.zeros((0,), dtype=np.int64)
-        )
-    else:
-        image_tensor = ToTensorV2()(image=image)["image"]
-
-    image_tensor = image_tensor.float()
-    if image_tensor.max() > 1.0:
-        image_tensor = image_tensor / 255.0
-
-    boxes_tensor = torch.as_tensor(boxes_np, dtype=torch.float32)
-    labels_tensor = torch.as_tensor(labels_np, dtype=torch.int64)
-    area_tensor = (
-        (boxes_tensor[:, 2] - boxes_tensor[:, 0]) *
-        (boxes_tensor[:, 3] - boxes_tensor[:, 1])
-    ) if len(boxes_tensor) > 0 else torch.zeros((0,), dtype=torch.float32)
-    target = {
-        "boxes": boxes_tensor,
-        "labels": labels_tensor,
-        "image_id": torch.tensor([sample_index], dtype=torch.int64),
-        "area": area_tensor,
-        "iscrowd": torch.zeros((len(labels_tensor),), dtype=torch.int64),
-    }
-    return image_tensor, target
 
 
 def _parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) -> tuple[list[list[float]], list[int]]:
@@ -410,26 +360,6 @@ def _parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) ->
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(int(class_name_to_id[class_name]))
     return boxes, labels
-
-
-def _get_train_transforms(image_size: int) -> A.Compose:
-    return A.Compose(
-        [
-            A.Resize(height=image_size, width=image_size),
-            A.HorizontalFlip(p=0.5),
-            A.Rotate(limit=15, p=0.5, border_mode=0),
-            A.RandomBrightnessContrast(p=0.3),
-            A.Affine(scale=(0.95, 1.05), translate_percent=(0.0, 0.05), p=0.3),
-            ToTensorV2(),
-        ],
-        bbox_params=A.BboxParams(
-            format="pascal_voc",
-            label_fields=["labels"],
-            min_visibility=0.1,
-        ),
-    )
-
-
 def _move_batch_to_device(images, targets, device: torch.device) -> tuple[list[torch.Tensor], list[dict[str, torch.Tensor]]]:
     device_images = [image.to(device) for image in images]
     device_targets = [{key: value.to(device) for key, value in target.items()} for target in targets]

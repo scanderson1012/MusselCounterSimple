@@ -126,8 +126,11 @@ class DatasetCreateRequest(BaseModel):
     """Request body for registering one training/test dataset directory pair."""
 
     name: str
-    images_dir: str
-    labels_dir: str
+    images_dir: str | None = None
+    labels_dir: str | None = None
+    zip_file_path: str | None = None
+    split_name: str | None = None
+    dataset_format: str | None = None
     description: str | None = None
 
 
@@ -137,10 +140,11 @@ class ModelRegisterRequest(BaseModel):
     source_model_path: str
     family_name: str | None = None
     description: str
-    training_images_dir: str
-    training_labels_dir: str
-    test_images_dir: str
-    test_labels_dir: str
+    dataset_zip_path: str | None = None
+    training_images_dir: str | None = None
+    training_labels_dir: str | None = None
+    test_images_dir: str | None = None
+    test_labels_dir: str | None = None
     architecture: str = "fasterrcnn_resnet50_fpn_v2"
     num_classes: int = 3
     notes: str | None = None
@@ -190,8 +194,7 @@ def _evaluate_model_version_on_assigned_test_set(model_job_id: str, model_versio
 
             evaluation_result = evaluate_model_file(
                 model_file_name=str(version["model_file_name"]),
-                images_dir=str(test_dataset["images_dir"]),
-                labels_dir=str(test_dataset["labels_dir"]),
+                dataset_record=test_dataset,
                 class_mapping=dict(version["class_mapping"]),
                 preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
                 progress_callback=lambda processed, total: update_model_job_progress(
@@ -234,7 +237,12 @@ def _fine_tune_latest_model_version(model_job_id: str, model_version_id: int) ->
                 raise ValueError("Model version not found")
             if not bool(version.get("is_latest_version")):
                 raise ValueError("Only the newest version in a model family can be fine-tuned.")
-            if version.get("training_images_dir") in (None, "") or version.get("training_labels_dir") in (None, ""):
+            has_folder_training_data = (
+                version.get("training_images_dir") not in (None, "")
+                and version.get("training_labels_dir") not in (None, "")
+            )
+            has_zip_training_data = version.get("training_dataset_zip_file_path") not in (None, "")
+            if not has_folder_training_data and not has_zip_training_data:
                 raise ValueError("This model version does not have a valid training dataset.")
 
             pending_limit = int(settings["fine_tune_min_new_images"])
@@ -278,13 +286,17 @@ def _fine_tune_latest_model_version(model_job_id: str, model_version_id: int) ->
                 architecture=str(version["architecture"]),
                 num_classes=int(version["num_classes"]),
                 class_mapping=dict(version["class_mapping"]),
-                base_train_images_dir=str(version["training_images_dir"]),
-                base_train_labels_dir=str(version["training_labels_dir"]),
+                base_train_dataset={
+                    "images_dir": version.get("training_images_dir"),
+                    "labels_dir": version.get("training_labels_dir"),
+                    "zip_file_path": version.get("training_dataset_zip_file_path"),
+                    "split_name": version.get("training_dataset_split_name"),
+                    "dataset_format": version.get("training_dataset_format"),
+                },
                 replay_history_images=replay_history_images,
                 replay_history_detections=replay_history_detections,
                 new_replay_images=pending_replay_images,
                 new_replay_detections=new_replay_detections,
-                num_epochs=int(settings["fine_tune_num_epochs"]),
             ),
             preferred_compute_mode=str(settings.get("compute_mode", "automatic")),
             progress_callback=lambda processed, total: update_model_job_progress(
@@ -616,6 +628,9 @@ def create_training_dataset(request: DatasetCreateRequest) -> dict[str, Any]:
                 name=request.name,
                 images_dir=request.images_dir,
                 labels_dir=request.labels_dir,
+                zip_file_path=request.zip_file_path,
+                split_name=request.split_name,
+                dataset_format=request.dataset_format,
                 description=request.description,
             )
             database_connection.commit()
@@ -642,6 +657,9 @@ def create_test_dataset(request: DatasetCreateRequest) -> dict[str, Any]:
                 name=request.name,
                 images_dir=request.images_dir,
                 labels_dir=request.labels_dir,
+                zip_file_path=request.zip_file_path,
+                split_name=request.split_name,
+                dataset_format=request.dataset_format,
                 description=request.description,
             )
             database_connection.commit()
@@ -657,15 +675,17 @@ def register_model(request: ModelRegisterRequest) -> dict[str, Any]:
         source_path = Path(request.source_model_path).expanduser().resolve()
         if not str(request.description or "").strip():
             raise RuntimeError("Model description is required.")
-        required_paths = {
-            "training_images_dir": request.training_images_dir,
-            "training_labels_dir": request.training_labels_dir,
-            "test_images_dir": request.test_images_dir,
-            "test_labels_dir": request.test_labels_dir,
-        }
-        for field_name, raw_value in required_paths.items():
-            if not str(raw_value or "").strip():
-                raise RuntimeError(f"{field_name} is required.")
+        is_zip_registration = str(request.dataset_zip_path or "").strip() != ""
+        if not is_zip_registration:
+            required_paths = {
+                "training_images_dir": request.training_images_dir,
+                "training_labels_dir": request.training_labels_dir,
+                "test_images_dir": request.test_images_dir,
+                "test_labels_dir": request.test_labels_dir,
+            }
+            for field_name, raw_value in required_paths.items():
+                if not str(raw_value or "").strip():
+                    raise RuntimeError(f"{field_name} is required.")
 
         with get_database_connection() as database_connection:
             inferred_family_name = (request.family_name or source_path.stem).strip()
@@ -675,6 +695,9 @@ def register_model(request: ModelRegisterRequest) -> dict[str, Any]:
                 name=f"{inferred_family_name}_train",
                 images_dir=request.training_images_dir,
                 labels_dir=request.training_labels_dir,
+                zip_file_path=request.dataset_zip_path,
+                split_name="train" if is_zip_registration else None,
+                dataset_format="roboflow_zip" if is_zip_registration else "folder_pairs",
                 description=f"Training dataset for {inferred_family_name}",
             )
             test_dataset = get_or_create_dataset_record(
@@ -683,6 +706,9 @@ def register_model(request: ModelRegisterRequest) -> dict[str, Any]:
                 name=f"{inferred_family_name}_test",
                 images_dir=request.test_images_dir,
                 labels_dir=request.test_labels_dir,
+                zip_file_path=request.dataset_zip_path,
+                split_name="test" if is_zip_registration else None,
+                dataset_format="roboflow_zip" if is_zip_registration else "folder_pairs",
                 description=f"Test dataset for {inferred_family_name}",
             )
             version = register_baseline_model(
@@ -747,8 +773,7 @@ def evaluate_registered_model(model_version_id: int, request: ModelEvaluateReque
             settings = get_app_settings(database_connection)
             evaluation_result = evaluate_model_file(
                 model_file_name=str(model_version["model_file_name"]),
-                images_dir=str(test_dataset["images_dir"]),
-                labels_dir=str(test_dataset["labels_dir"]),
+                dataset_record=test_dataset,
                 class_mapping=dict(model_version["class_mapping"]),
                 score_threshold=float(request.score_threshold),
                 preferred_compute_mode=str(settings.get("compute_mode", "automatic")),

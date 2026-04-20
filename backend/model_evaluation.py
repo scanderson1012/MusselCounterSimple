@@ -7,71 +7,51 @@ import json
 import xml.etree.ElementTree as ET
 from typing import Any
 
-from PIL import Image
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.ops import box_iou
-import torchvision.transforms as transforms
 
+from backend.dataset_sources import dataset_record_to_source
+from backend.dataset_sources import list_pascal_voc_samples
 from backend.model_execution import _get_model_device
-
-VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-EVAL_IMAGE_SIZE = 640
+from backend.training_config import DEFAULT_EVAL_SCORE_THRESHOLD
+from backend.training_config import build_training_sample
+from backend.training_config import get_eval_transforms
 
 
 class PascalVOCDataset(Dataset):
-    """Small detection dataset wrapper for images + Pascal VOC XML labels."""
+    """Small detection dataset wrapper for Pascal VOC image/XML pairs."""
 
-    def __init__(self, images_dir: str, labels_dir: str, class_name_to_id: dict[str, int]):
-        self.images_dir = Path(images_dir)
-        self.labels_dir = Path(labels_dir)
+    def __init__(self, samples: list[tuple[Path, Path]], class_name_to_id: dict[str, int]):
+        self.samples = samples
         self.class_name_to_id = class_name_to_id
-        self.transform = transforms.ToTensor()
-        self.samples: list[tuple[Path, Path]] = []
-
-        for image_path in sorted(self.images_dir.iterdir()):
-            if not image_path.is_file() or image_path.suffix.lower() not in VALID_IMAGE_EXTENSIONS:
-                continue
-            label_path = self.labels_dir / f"{image_path.stem}.xml"
-            if label_path.is_file():
-                self.samples.append((image_path, label_path))
+        self.transforms = get_eval_transforms()
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, dict[str, Any]]:
         image_path, label_path = self.samples[index]
-        image = Image.open(image_path).convert("RGB")
+        from PIL import Image
+        import numpy as np
+
+        image = np.array(Image.open(image_path).convert("RGB"))
         boxes, labels = parse_pascal_voc_xml(label_path, self.class_name_to_id)
-        resized_image, resized_boxes = _resize_image_and_boxes(
+        return build_training_sample(
             image=image,
             boxes=boxes,
-            target_size=EVAL_IMAGE_SIZE,
+            labels=labels,
+            sample_index=index,
+            transforms=self.transforms,
         )
-        boxes_tensor = torch.as_tensor(resized_boxes, dtype=torch.float32)
-        labels_tensor = torch.as_tensor(labels, dtype=torch.int64)
-        area_tensor = (
-            (boxes_tensor[:, 2] - boxes_tensor[:, 0]) *
-            (boxes_tensor[:, 3] - boxes_tensor[:, 1])
-        ) if len(boxes_tensor) > 0 else torch.zeros((0,), dtype=torch.float32)
-
-        target = {
-            "boxes": boxes_tensor,
-            "labels": labels_tensor,
-            "image_id": torch.tensor([index], dtype=torch.int64),
-            "area": area_tensor,
-            "iscrowd": torch.zeros((len(labels_tensor),), dtype=torch.int64),
-        }
-        return self.transform(resized_image), target
 
 
 def evaluate_model_file(
     model_file_name: str,
-    images_dir: str,
-    labels_dir: str,
+    dataset_record: dict[str, Any],
     class_mapping: dict[str, str],
-    score_threshold: float = 0.5,
+    score_threshold: float = DEFAULT_EVAL_SCORE_THRESHOLD,
     preferred_compute_mode: str = "automatic",
     progress_callback=None,
     stage_callback=None,
@@ -80,7 +60,8 @@ def evaluate_model_file(
     """Run mAP + per-class metrics on one registered model file."""
     class_id_to_name = {int(key): str(value) for key, value in class_mapping.items()}
     class_name_to_id = {value: key for key, value in class_id_to_name.items()}
-    dataset = PascalVOCDataset(images_dir, labels_dir, class_name_to_id)
+    dataset_source = dataset_record_to_source(dataset_record)
+    dataset = PascalVOCDataset(list_pascal_voc_samples(dataset_source), class_name_to_id)
     if len(dataset) == 0:
         raise ValueError("No Pascal VOC image/XML pairs were found in the selected test dataset")
 
@@ -183,35 +164,6 @@ def parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) -> 
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(class_name_to_id[class_name])
     return boxes, labels
-
-
-def _resize_image_and_boxes(
-    image: Image.Image,
-    boxes: list[list[float]],
-    target_size: int,
-) -> tuple[Image.Image, list[list[float]]]:
-    """Mirror the training notebook's eval resize to a fixed square image size."""
-    original_width, original_height = image.size
-    resized_image = image.resize((target_size, target_size), Image.Resampling.BILINEAR)
-
-    if original_width <= 0 or original_height <= 0 or not boxes:
-        return resized_image, boxes
-
-    scale_x = target_size / float(original_width)
-    scale_y = target_size / float(original_height)
-    resized_boxes: list[list[float]] = []
-    for xmin, ymin, xmax, ymax in boxes:
-        resized_boxes.append(
-            [
-                xmin * scale_x,
-                ymin * scale_y,
-                xmax * scale_x,
-                ymax * scale_y,
-            ]
-        )
-    return resized_image, resized_boxes
-
-
 def store_model_evaluation(
     database_connection,
     model_version_id: int,

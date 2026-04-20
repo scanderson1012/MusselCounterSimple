@@ -1,4 +1,4 @@
-"""Faster R-CNN model_execution + database writeback helpers.
+"""Faster R-CNN inference + database writeback helpers.
 
 This module handles the full backend model_execution path:
 - Resolve and validate the requested model file path.
@@ -7,7 +7,6 @@ This module handles the full backend model_execution path:
 - Replace detections/counts for each `run_images` row being processed.
 """
 
-from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
 from typing import Any
@@ -16,16 +15,16 @@ import sqlite3
 from PIL import Image
 import torch
 import torchvision
-import torchvision.transforms as transforms
 
 from backend.compute import resolve_torch_device
+from backend.training_config import CLASS_ID_TO_NAME
+from backend.training_config import MODEL_ARCHITECTURE
+from backend.training_config import NUM_CLASSES
+from backend.training_config import invert_replay_boxes
+from backend.training_config import normalize_loaded_state_dict
+from backend.training_config import replay_transform_image
 
-# Maps RCNN class IDs to app labels used by detections/counts.
-# Background class (0) is intentionally excluded.
-RCNN_LABELS = {
-    1: "live",
-    2: "dead",
-}
+RCNN_LABELS = CLASS_ID_TO_NAME
 
 # Whitelisted TorchVision Faster R-CNN builders.
 _SUPPORTED_ARCHS: dict[str, Any] = {
@@ -38,8 +37,8 @@ _SUPPORTED_ARCHS: dict[str, Any] = {
 # arch must be a key in _SUPPORTED_ARCHS.
 # num_classes must include the background class (e.g. 3 = background + live + dead).
 MODEL_CONFIG: dict[str, Any] = {
-    "arch": "fasterrcnn_resnet50_fpn_v2",
-    "num_classes": 3,
+    "arch": MODEL_ARCHITECTURE,
+    "num_classes": NUM_CLASSES,
 }
 
 # Cache key: absolute model path.
@@ -101,24 +100,7 @@ def _load_model(model_path: Path, preferred_compute_mode: str) -> tuple[Any, Any
     # Load checkpoint on the target device.
     checkpoint = torch.load(str(model_path), map_location=device)
 
-    # Support common checkpoint layouts without requiring re-export.
-    if isinstance(checkpoint, dict):
-        if "model_state_dict" in checkpoint:
-            state_dict = checkpoint["model_state_dict"]
-        elif "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
-        else:
-            state_dict = checkpoint
-    else:
-        state_dict = checkpoint
-
-    if not isinstance(state_dict, (dict, OrderedDict)):
-        raise RuntimeError("Expected checkpoint to contain model weights state_dict.")
-
-    # Strip DataParallel prefixes (module.*) when present.
-    normalized_state_dict: OrderedDict[str, Any] = OrderedDict()
-    for key, value in state_dict.items():
-        normalized_state_dict[key.removeprefix("module.")] = value
+    normalized_state_dict = normalize_loaded_state_dict(checkpoint)
 
     model = _build_model(MODEL_CONFIG)
     try:
@@ -159,21 +141,23 @@ def _run_rcnn_model_execution(model_device_tuple: tuple[Any, Any], image_path: s
     `class_name`, `confidence_score`, and `bbox_x1..bbox_y2`.
     """
     model, device = model_device_tuple
-    transform = transforms.ToTensor()
-
-    # TorchVision "detectors" are object-detection models (for example, Faster R-CNN).
-    # A "tensor" is PyTorch's numeric image array format.
-    # The detector API expects a list of image tensors, and returns a list of prediction dicts.
-    # PIL -> tensor on target device.
     image = Image.open(image_path).convert("RGB")
-    tensor = transform(image).to(device)
+    original_width, original_height = image.size
+    tensor, replay = replay_transform_image(image)
+    tensor = tensor.to(device)
 
     with torch.no_grad():
         prediction = model([tensor])[0]
 
-    boxes = prediction["boxes"].detach().cpu().tolist()
+    transformed_boxes = prediction["boxes"].detach().cpu().tolist()
     scores = prediction["scores"].detach().cpu().tolist()
     labels = prediction["labels"].detach().cpu().tolist()
+    boxes = invert_replay_boxes(
+        transformed_boxes,
+        replay=replay,
+        original_width=original_width,
+        original_height=original_height,
+    )
 
     detections: list[dict[str, Any]] = []
     for box, score, label in zip(boxes, scores, labels):

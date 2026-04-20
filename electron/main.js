@@ -317,6 +317,26 @@ ipcMain.handle("dialog:pick-model", async () => {
   return { fileName, filePath: sourcePath };
 });
 
+// IPC endpoint: open native file picker for a Roboflow dataset zip.
+ipcMain.handle("dialog:pick-dataset-zip", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select Dataset Zip File",
+    properties: ["openFile"],
+    filters: [
+      { name: "Zip Files", extensions: ["zip"] },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const sourcePath = result.filePaths[0];
+  const fileName = path.basename(sourcePath);
+  return { fileName, filePath: sourcePath };
+});
+
 // IPC endpoint: download one backend-served file through a save dialog.
 ipcMain.handle("backend:download-file", async (_event, request) => {
   const apiPath = String(request?.apiPath ?? "/");

@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS training_datasets (
     name TEXT NOT NULL UNIQUE,
     images_dir TEXT NOT NULL,
     labels_dir TEXT NOT NULL,
+    zip_file_path TEXT,
+    split_name TEXT,
+    dataset_format TEXT NOT NULL DEFAULT 'folder_pairs',
     description TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -59,6 +62,9 @@ CREATE TABLE IF NOT EXISTS test_datasets (
     name TEXT NOT NULL UNIQUE,
     images_dir TEXT NOT NULL,
     labels_dir TEXT NOT NULL,
+    zip_file_path TEXT,
+    split_name TEXT,
+    dataset_format TEXT NOT NULL DEFAULT 'folder_pairs',
     description TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

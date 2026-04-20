@@ -8,6 +8,9 @@ import shutil
 import sqlite3
 from typing import Any
 
+from backend.dataset_sources import DATASET_FORMAT_FOLDER_PAIRS
+from backend.dataset_sources import DATASET_FORMAT_ROBOFLOW_ZIP
+from backend.dataset_sources import create_dataset_source
 from backend.init_db import BASELINE_MODEL_FAMILY_NAME
 from backend.init_db import MODELS_DIRECTORY
 from backend.replay_buffer import list_replay_buffer_counts_by_model
@@ -47,6 +50,7 @@ def list_model_options(database_connection: sqlite3.Connection) -> dict[str, Any
                 "id": int(version["id"]),
                 "family_id": int(version["family_id"]),
                 "family_name": str(version["family_name"]),
+                "is_bundled_baseline": _is_protected_baseline_family(str(version["family_name"])),
                 "version_number": int(version["version_number"]),
                 "version_tag": str(version["version_tag"]),
                 "file_name": f"{version['family_name']} {version['version_tag']}",
@@ -68,6 +72,9 @@ def list_training_datasets(database_connection: sqlite3.Connection) -> list[dict
             name,
             images_dir,
             labels_dir,
+            zip_file_path,
+            split_name,
+            dataset_format,
             description,
             created_at
         FROM training_datasets
@@ -85,6 +92,9 @@ def list_test_datasets(database_connection: sqlite3.Connection) -> list[dict[str
             name,
             images_dir,
             labels_dir,
+            zip_file_path,
+            split_name,
+            dataset_format,
             description,
             created_at
         FROM test_datasets
@@ -98,23 +108,66 @@ def create_dataset_record(
     database_connection: sqlite3.Connection,
     table_name: str,
     name: str,
-    images_dir: str,
-    labels_dir: str,
+    images_dir: str | None = None,
+    labels_dir: str | None = None,
+    zip_file_path: str | None = None,
+    split_name: str | None = None,
+    dataset_format: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
     """Create one train/test dataset record after validating its directories."""
     if table_name not in {"training_datasets", "test_datasets"}:
         raise ValueError(f"Unsupported dataset table: {table_name}")
-
-    validated_images_dir = _validate_dataset_directory(images_dir, "images_dir")
-    validated_labels_dir = _validate_dataset_directory(labels_dir, "labels_dir")
+    dataset_source = create_dataset_source(
+        images_dir=images_dir,
+        labels_dir=labels_dir,
+        zip_file_path=zip_file_path,
+        split_name=split_name,
+        dataset_format=dataset_format,
+    )
+    validated_images_dir = (
+        str(dataset_source.images_dir)
+        if dataset_source.images_dir is not None
+        else ""
+    )
+    validated_labels_dir = (
+        str(dataset_source.labels_dir)
+        if dataset_source.labels_dir is not None
+        else ""
+    )
+    validated_zip_file_path = (
+        str(dataset_source.zip_file_path)
+        if dataset_source.zip_file_path is not None
+        else None
+    )
+    normalized_split_name = (
+        str(dataset_source.split_name)
+        if dataset_source.split_name is not None
+        else None
+    )
 
     cursor = database_connection.execute(
         f"""
-        INSERT INTO {table_name} (name, images_dir, labels_dir, description)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO {table_name} (
+            name,
+            images_dir,
+            labels_dir,
+            zip_file_path,
+            split_name,
+            dataset_format,
+            description
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (name.strip(), validated_images_dir, validated_labels_dir, _normalize_text(description)),
+        (
+            name.strip(),
+            validated_images_dir,
+            validated_labels_dir,
+            validated_zip_file_path,
+            normalized_split_name,
+            dataset_source.dataset_format,
+            _normalize_text(description),
+        ),
     )
     dataset_id = int(cursor.lastrowid)
     row = database_connection.execute(
@@ -124,6 +177,9 @@ def create_dataset_record(
             name,
             images_dir,
             labels_dir,
+            zip_file_path,
+            split_name,
+            dataset_format,
             description,
             created_at
         FROM {table_name}
@@ -138,32 +194,71 @@ def get_or_create_dataset_record(
     database_connection: sqlite3.Connection,
     table_name: str,
     name: str,
-    images_dir: str,
-    labels_dir: str,
+    images_dir: str | None = None,
+    labels_dir: str | None = None,
+    zip_file_path: str | None = None,
+    split_name: str | None = None,
+    dataset_format: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
     """Return an existing dataset with matching paths or create a new one."""
     if table_name not in {"training_datasets", "test_datasets"}:
         raise ValueError(f"Unsupported dataset table: {table_name}")
-
-    validated_images_dir = _validate_dataset_directory(images_dir, "images_dir")
-    validated_labels_dir = _validate_dataset_directory(labels_dir, "labels_dir")
-    row = database_connection.execute(
-        f"""
-        SELECT
-            id,
-            name,
-            images_dir,
-            labels_dir,
-            description,
-            created_at
-        FROM {table_name}
-        WHERE images_dir = ? AND labels_dir = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (validated_images_dir, validated_labels_dir),
-    ).fetchone()
+    dataset_source = create_dataset_source(
+        images_dir=images_dir,
+        labels_dir=labels_dir,
+        zip_file_path=zip_file_path,
+        split_name=split_name,
+        dataset_format=dataset_format,
+    )
+    if dataset_source.dataset_format == DATASET_FORMAT_ROBOFLOW_ZIP:
+        row = database_connection.execute(
+            f"""
+            SELECT
+                id,
+                name,
+                images_dir,
+                labels_dir,
+                zip_file_path,
+                split_name,
+                dataset_format,
+                description,
+                created_at
+            FROM {table_name}
+            WHERE dataset_format = ? AND zip_file_path = ? AND split_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                DATASET_FORMAT_ROBOFLOW_ZIP,
+                str(dataset_source.zip_file_path),
+                str(dataset_source.split_name),
+            ),
+        ).fetchone()
+    else:
+        row = database_connection.execute(
+            f"""
+            SELECT
+                id,
+                name,
+                images_dir,
+                labels_dir,
+                zip_file_path,
+                split_name,
+                dataset_format,
+                description,
+                created_at
+            FROM {table_name}
+            WHERE dataset_format = ? AND images_dir = ? AND labels_dir = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                DATASET_FORMAT_FOLDER_PAIRS,
+                str(dataset_source.images_dir),
+                str(dataset_source.labels_dir),
+            ),
+        ).fetchone()
     if row is not None:
         return dict(row)
 
@@ -172,8 +267,11 @@ def get_or_create_dataset_record(
         database_connection=database_connection,
         table_name=table_name,
         name=resolved_name,
-        images_dir=validated_images_dir,
-        labels_dir=validated_labels_dir,
+        images_dir=str(dataset_source.images_dir) if dataset_source.images_dir is not None else None,
+        labels_dir=str(dataset_source.labels_dir) if dataset_source.labels_dir is not None else None,
+        zip_file_path=str(dataset_source.zip_file_path) if dataset_source.zip_file_path is not None else None,
+        split_name=str(dataset_source.split_name) if dataset_source.split_name is not None else None,
+        dataset_format=dataset_source.dataset_format,
         description=description,
     )
 
@@ -197,6 +295,7 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
     families: list[dict[str, Any]] = []
     for family_row in family_rows:
         family_data = dict(family_row)
+        family_data["is_bundled_baseline"] = _is_protected_baseline_family(str(family_data["name"]))
         versions = database_connection.execute(
             """
             SELECT
@@ -220,10 +319,16 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
                 training_datasets.name AS training_dataset_name,
                 training_datasets.images_dir AS training_images_dir,
                 training_datasets.labels_dir AS training_labels_dir,
+                training_datasets.zip_file_path AS training_dataset_zip_file_path,
+                training_datasets.split_name AS training_dataset_split_name,
+                training_datasets.dataset_format AS training_dataset_format,
                 training_datasets.description AS training_dataset_description,
                 test_datasets.name AS test_dataset_name,
                 test_datasets.images_dir AS test_images_dir,
                 test_datasets.labels_dir AS test_labels_dir,
+                test_datasets.zip_file_path AS test_dataset_zip_file_path,
+                test_datasets.split_name AS test_dataset_split_name,
+                test_datasets.dataset_format AS test_dataset_format,
                 test_datasets.description AS test_dataset_description
             FROM model_versions
             LEFT JOIN training_datasets ON training_datasets.id = model_versions.training_dataset_id
@@ -239,6 +344,7 @@ def list_model_registry(database_connection: sqlite3.Connection) -> list[dict[st
         for version_row in versions:
             version_data = dict(version_row)
             version_data["class_mapping"] = _parse_json(version_data.pop("class_mapping_json"), DEFAULT_CLASS_MAPPING)
+            version_data["is_bundled_baseline"] = bool(family_data["is_bundled_baseline"])
             latest_evaluation = database_connection.execute(
                 """
                 SELECT
@@ -803,15 +909,6 @@ def _require_dataset(database_connection: sqlite3.Connection, table_name: str, d
     ).fetchone()
     if row is None:
         raise ValueError(f"{table_name[:-1].replace('_', ' ')} not found: {dataset_id}")
-
-
-def _validate_dataset_directory(raw_path: str, field_name: str) -> str:
-    path = Path(raw_path).expanduser().resolve()
-    if not path.is_dir():
-        raise FileNotFoundError(f"{field_name} directory not found: {path}")
-    return str(path)
-
-
 def _normalize_text(value: str | None) -> str | None:
     if value is None:
         return None

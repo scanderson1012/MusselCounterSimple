@@ -48,7 +48,7 @@ function SettingsView({
                 />
               </div>
               <p className="helper">
-                Choose when making a new model version becomes available and how long that process should run.
+                Choose when making a new model version becomes available. The training schedule itself follows the fixed settings from the shared training script.
               </p>
             </div>
           </div>
@@ -77,35 +77,11 @@ function SettingsView({
                 Fine-Tune becomes available when the newest version of a model has at least this many reviewed images saved for later use.
               </p>
             </div>
-
-            <div className="field">
-              <label htmlFor="fine-tune-num-epochs" className="label-with-help">
-                <span>Fine-Tuning Epochs</span>
-                <HelpTooltip
-                  title="Fine-tuning epochs"
-                  wide
-                  content={[
-                    "This number controls how many times the app goes through the images while making a new model version.",
-                    "A larger number usually means a longer run time.",
-                  ]}
-                />
-              </label>
-              <input
-                id="fine-tune-num-epochs"
-                type="number"
-                min="1"
-                value={draftSettings.fine_tune_num_epochs}
-                onChange={(event) => onChangeSetting("fine_tune_num_epochs", event.target.value)}
-              />
-              <p className="helper">
-                A larger number usually means the app works longer before the new version is ready.
-              </p>
-            </div>
           </div>
 
           <div className="settings-footer">
             <p className="helper">
-              Current saved settings: {Number(settings.fine_tune_min_new_images || 0)} new images, {Number(settings.fine_tune_num_epochs || 0)} epochs.
+              Current saved settings: {Number(settings.fine_tune_min_new_images || 0)} new images required. Fine-tuning uses the fixed training-script schedule.
             </p>
             <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings}>
               {isSavingSettings ? "Saving..." : "Save Settings"}

@@ -15,7 +15,8 @@ IMAGES_DIRECTORY = APP_DATA / "images"
 MODELS_DIRECTORY = APP_DATA / "models"
 EXPORTS_DIRECTORY = APP_DATA / "exports"
 SCHEMA_PATH = BACKEND_DIRECTORY / "schema.sql"
-BASELINE_MODEL_FAMILY_NAME = os.getenv("MUSSEL_BASELINE_MODEL_NAME", "fasterrcnn_baseline")
+BASELINE_MODEL_FAMILY_NAME = os.getenv("MUSSEL_BASELINE_MODEL_NAME", "final_baseline_fasterrcnn_model")
+LEGACY_BASELINE_MODEL_FAMILY_NAMES = ("fasterrcnn_baseline",)
 BASELINE_MODEL_PATH = Path(
     os.getenv("MUSSEL_BASELINE_MODEL_PATH", str(PROJECT_ROOT / "fasterrcnn_baseline.pth"))
 ).expanduser().resolve()
@@ -53,7 +54,7 @@ BASELINE_MODEL_DESCRIPTION = (
 )
 DEFAULT_APP_SETTINGS = {
     "fine_tune_min_new_images": "10",
-    "fine_tune_num_epochs": "5",
+    "fine_tune_num_epochs": "10",
     "compute_mode": "automatic",
     "gpu_upgrade_prompt_seen": "0",
 }
@@ -105,9 +106,13 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if model_version_columns and "description" not in model_version_columns:
         conn.execute("ALTER TABLE model_versions ADD COLUMN description TEXT")
 
+    _apply_dataset_table_migrations(conn, "training_datasets")
+    _apply_dataset_table_migrations(conn, "test_datasets")
+
     # Backfill legacy disk models into the registry so existing installs still work.
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)
+        _remove_legacy_bundled_baselines(conn)
         _backfill_bundled_baseline_description(conn)
         _backfill_bundled_baseline_dataset_paths(conn)
     _seed_default_app_settings(conn)
@@ -123,6 +128,22 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
         (table_name,),
     ).fetchone()
     return result is not None
+
+
+def _apply_dataset_table_migrations(conn: sqlite3.Connection, table_name: str) -> None:
+    if not _table_exists(conn, table_name):
+        return
+    columns = {
+        row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if "zip_file_path" not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN zip_file_path TEXT")
+    if "split_name" not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN split_name TEXT")
+    if "dataset_format" not in columns:
+        conn.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN dataset_format TEXT NOT NULL DEFAULT 'folder_pairs'"
+        )
 
 
 def _seed_legacy_models(conn: sqlite3.Connection) -> None:
@@ -245,6 +266,55 @@ def _seed_bundled_baseline(conn: sqlite3.Connection) -> None:
     # evaluation manually from the Models page.
 
 
+def _remove_legacy_bundled_baselines(conn: sqlite3.Connection) -> None:
+    """Delete seeded baseline families from older app builds so only the current one remains."""
+    legacy_family_names = [
+        family_name
+        for family_name in LEGACY_BASELINE_MODEL_FAMILY_NAMES
+        if family_name.strip().lower() != BASELINE_MODEL_FAMILY_NAME.strip().lower()
+    ]
+    if not legacy_family_names:
+        return
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            model_versions.id,
+            model_versions.model_file_name,
+            model_families.id AS family_id,
+            model_families.name AS family_name
+        FROM model_versions
+        JOIN model_families ON model_families.id = model_versions.family_id
+        WHERE model_families.name IN ({",".join("?" for _ in legacy_family_names)})
+        """,
+        tuple(legacy_family_names),
+    ).fetchall()
+    if not rows:
+        return
+
+    for row in rows:
+        model_path = Path(str(row["model_file_name"])).expanduser().resolve()
+        if model_path.is_file():
+            model_path.unlink(missing_ok=True)
+        _delete_empty_model_parent_directories(model_path)
+
+    family_ids = {int(row["family_id"]) for row in rows}
+    conn.execute(
+        f"""
+        DELETE FROM model_versions
+        WHERE family_id IN ({",".join("?" for _ in family_ids)})
+        """,
+        tuple(family_ids),
+    )
+    conn.execute(
+        f"""
+        DELETE FROM model_families
+        WHERE id IN ({",".join("?" for _ in family_ids)})
+        """,
+        tuple(family_ids),
+    )
+
+
 def _backfill_bundled_baseline_description(conn: sqlite3.Connection) -> None:
     """Populate the bundled baseline description for older local databases."""
     conn.execute(
@@ -360,6 +430,22 @@ def _seed_default_app_settings(conn: sqlite3.Connection) -> None:
             """,
             (setting_key, setting_value),
         )
+
+
+def _delete_empty_model_parent_directories(model_path: Path) -> None:
+    """Best-effort cleanup for empty version/family folders under managed models storage."""
+    try:
+        models_root = MODELS_DIRECTORY.resolve()
+    except FileNotFoundError:
+        return
+
+    current = model_path.parent
+    while current != models_root and models_root in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 if __name__ == "__main__":
