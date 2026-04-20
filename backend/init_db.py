@@ -15,10 +15,13 @@ IMAGES_DIRECTORY = APP_DATA / "images"
 MODELS_DIRECTORY = APP_DATA / "models"
 EXPORTS_DIRECTORY = APP_DATA / "exports"
 SCHEMA_PATH = BACKEND_DIRECTORY / "schema.sql"
-BASELINE_MODEL_FAMILY_NAME = os.getenv("MUSSEL_BASELINE_MODEL_NAME", "final_baseline_fasterrcnn_model")
-LEGACY_BASELINE_MODEL_FAMILY_NAMES = ("fasterrcnn_baseline",)
+BASELINE_MODEL_FAMILY_NAME = os.getenv("MUSSEL_BASELINE_MODEL_NAME", "baseline_fasterrcnn_model")
+LEGACY_BASELINE_MODEL_FAMILY_NAMES = (
+    "fasterrcnn_baseline",
+    "final_baseline_fasterrcnn_model",
+)
 BASELINE_MODEL_PATH = Path(
-    os.getenv("MUSSEL_BASELINE_MODEL_PATH", str(PROJECT_ROOT / "fasterrcnn_baseline.pth"))
+    os.getenv("MUSSEL_BASELINE_MODEL_PATH", str(PROJECT_ROOT / "baseline_fasterrcnn_model.pth"))
 ).expanduser().resolve()
 BASELINE_TRAIN_IMAGES_DIR = Path(
     os.getenv(
@@ -53,7 +56,7 @@ BASELINE_MODEL_DESCRIPTION = (
     "accurately detect and classify other mussels species or ages."
 )
 DEFAULT_APP_SETTINGS = {
-    "fine_tune_min_new_images": "10",
+    "fine_tune_min_new_images": "25",
     "fine_tune_num_epochs": "10",
     "compute_mode": "automatic",
     "gpu_upgrade_prompt_seen": "0",
@@ -112,6 +115,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # Backfill legacy disk models into the registry so existing installs still work.
     if _table_exists(conn, "model_versions"):
         _seed_legacy_models(conn)
+        _migrate_bundled_baseline_identity(conn)
         _remove_legacy_bundled_baselines(conn)
         _backfill_bundled_baseline_description(conn)
         _backfill_bundled_baseline_dataset_paths(conn)
@@ -264,6 +268,88 @@ def _seed_bundled_baseline(conn: sqlite3.Connection) -> None:
     )
     # The bundled baseline should be registered automatically, but users trigger
     # evaluation manually from the Models page.
+
+
+def _migrate_bundled_baseline_identity(conn: sqlite3.Connection) -> None:
+    """Rename the bundled baseline family and managed checkpoint path for existing installs."""
+    legacy_family_names = [
+        family_name
+        for family_name in LEGACY_BASELINE_MODEL_FAMILY_NAMES
+        if family_name.strip().lower() != BASELINE_MODEL_FAMILY_NAME.strip().lower()
+    ]
+    if not legacy_family_names:
+        return
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            model_versions.id,
+            model_versions.version_number,
+            model_versions.original_file_name,
+            model_versions.model_file_name,
+            model_versions.family_id,
+            model_families.name AS family_name
+        FROM model_versions
+        JOIN model_families ON model_families.id = model_versions.family_id
+        WHERE model_families.name IN ({",".join("?" for _ in legacy_family_names)})
+        ORDER BY model_versions.version_number ASC
+        """,
+        tuple(legacy_family_names),
+    ).fetchall()
+    if not rows:
+        return
+
+    for row in rows:
+        old_model_path = Path(str(row["model_file_name"])).expanduser().resolve()
+        new_model_path = MODELS_DIRECTORY / BASELINE_MODEL_FAMILY_NAME / f"v{int(row['version_number'])}" / BASELINE_MODEL_PATH.name
+        if old_model_path.is_file():
+            new_model_path.parent.mkdir(parents=True, exist_ok=True)
+            if old_model_path.resolve() != new_model_path.resolve():
+                old_model_path.replace(new_model_path)
+            _delete_empty_model_parent_directories(old_model_path)
+
+        conn.execute(
+            """
+            UPDATE model_versions
+            SET
+                original_file_name = ?,
+                model_file_name = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                BASELINE_MODEL_PATH.name,
+                str(new_model_path.resolve()),
+                int(row["id"]),
+            ),
+        )
+
+    family_ids = {int(row["family_id"]) for row in rows}
+    primary_family_id = min(family_ids)
+    conn.execute(
+        """
+        UPDATE model_families
+        SET name = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (BASELINE_MODEL_FAMILY_NAME, primary_family_id),
+    )
+    for extra_family_id in sorted(family_ids - {primary_family_id}):
+        conn.execute(
+            """
+            UPDATE model_versions
+            SET family_id = ?
+            WHERE family_id = ?
+            """,
+            (primary_family_id, extra_family_id),
+        )
+        conn.execute(
+            """
+            DELETE FROM model_families
+            WHERE id = ?
+            """,
+            (extra_family_id,),
+        )
 
 
 def _remove_legacy_bundled_baselines(conn: sqlite3.Connection) -> None:

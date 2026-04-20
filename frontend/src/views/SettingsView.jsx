@@ -28,7 +28,7 @@ function SettingsView({
       <div className="run-header">
         <h1>Settings</h1>
         <p className="run-meta-text">
-          Change how many reviewed images are needed before you can make a new model version, and choose whether the app should try to use your GPU.
+          Choose when fine-tuning becomes available and whether the app should use automatic compute, CPU only, or GPU if available.
         </p>
       </div>
 
@@ -48,7 +48,7 @@ function SettingsView({
                 />
               </div>
               <p className="helper">
-                Choose when making a new model version becomes available. The training schedule itself follows the fixed settings from the shared training script.
+                These settings control when a new model version can be created. Recommended settings: Automatic compute, 10 epochs, and 25 new images.
               </p>
             </div>
           </div>
@@ -63,6 +63,7 @@ function SettingsView({
                   content={[
                     "This is the number of reviewed images you need before the Fine-Tune button becomes available.",
                     "A higher number means you wait longer. A lower number means it becomes available sooner.",
+                    "Recommended setting: 25 new images.",
                   ]}
                 />
               </label>
@@ -77,11 +78,36 @@ function SettingsView({
                 Fine-Tune becomes available when the newest version of a model has at least this many reviewed images saved for later use.
               </p>
             </div>
+
+            <div className="field">
+              <label htmlFor="fine-tune-num-epochs" className="label-with-help">
+                <span>Fine-Tuning Epochs</span>
+                <HelpTooltip
+                  title="Fine-tuning epochs"
+                  wide
+                  content={[
+                    "This number controls how many times the app goes through the images while making a new model version.",
+                    "A larger number usually means a longer run time.",
+                    "Recommended setting: 10 epochs.",
+                  ]}
+                />
+              </label>
+              <input
+                id="fine-tune-num-epochs"
+                type="number"
+                min="1"
+                value={draftSettings.fine_tune_num_epochs}
+                onChange={(event) => onChangeSetting("fine_tune_num_epochs", event.target.value)}
+              />
+              <p className="helper">
+                A larger number usually means the app runs longer before the new version is ready.
+              </p>
+            </div>
           </div>
 
           <div className="settings-footer">
             <p className="helper">
-              Current saved settings: {Number(settings.fine_tune_min_new_images || 0)} new images required. Fine-tuning uses the fixed training-script schedule.
+              Current saved settings: {Number(settings.fine_tune_min_new_images || 0)} new images required and {Number(settings.fine_tune_num_epochs || 0)} epochs.
             </p>
             <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings}>
               {isSavingSettings ? "Saving..." : "Save Settings"}
@@ -104,7 +130,7 @@ function SettingsView({
                 />
               </div>
               <p className="helper">
-                Choose whether the app should stay on the CPU or try to use the GPU when possible.
+                Automatic is the recommended setting. Use CPU Only if you do not want the app to try using the GPU.
               </p>
             </div>
           </div>
@@ -117,7 +143,7 @@ function SettingsView({
                   title="Compute mode"
                   wide
                   content={[
-                    "Automatic lets the app decide.",
+                    "Automatic lets the app decide and is the recommended setting.",
                     "CPU Only means the app will always use the CPU.",
                     "GPU If Available means the app will try to use the GPU when it is ready.",
                   ]}
@@ -128,12 +154,12 @@ function SettingsView({
                 value={draftSettings.compute_mode}
                 onChange={(event) => onChangeSetting("compute_mode", event.target.value)}
               >
-                <option value="automatic">Automatic</option>
+                <option value="automatic">Automatic (Recommended)</option>
                 <option value="cpu_only">CPU only</option>
                 <option value="gpu_if_available">GPU if available</option>
               </select>
               <p className="helper">
-                If the GPU is not ready, the app will use the CPU instead.
+                If the GPU is not ready, the app uses the CPU instead.
               </p>
             </div>
 
@@ -169,7 +195,7 @@ function SettingsView({
 
           <div className="settings-footer">
             <p className="helper">
-              The app can always use the CPU. It uses the GPU only when your computer is ready for it.
+              Current saved setting: {formatComputeModeLabel(settings.compute_mode)}.
             </p>
             <button className="primary" onClick={onSaveSettings} disabled={isSavingSettings}>
               {isSavingSettings ? "Saving..." : "Save Settings"}

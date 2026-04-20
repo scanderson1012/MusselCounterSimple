@@ -82,13 +82,13 @@ function ModelsView({
         </div>
         <p className="helper">
           Click <strong>Add Model</strong>, choose a `.pth` or `.pt` model file, then choose the Roboflow dataset `.zip`
-          used to train and test it, and enter a model name and clear description.
+          used to train and test it, then enter a model name and clear description.
         </p>
         <p className="helper">
           The description should explain what the model is for, what kinds of images it fits, and when someone should use it.
         </p>
         <p className="helper">
-          After you save it, the app stores the model and its dataset information. The test only runs when you click
+          After you save it, the app stores the model and its dataset information. The test runs only when you click
           <strong> Evaluate on Test Set</strong> for that version.
         </p>
       </div>
@@ -164,14 +164,14 @@ function ModelsView({
                           <button className="ghost" onClick={() => onOpenModelInfo(version.id)}>
                             Model Information
                           </button>
-                          <HelpTooltip
-                            title="Model information"
-                            wide
-                            content={[
-                              "Opens the saved description, folder details, and test results for this version.",
+                            <HelpTooltip
+                              title="Model information"
+                              wide
+                              content={[
+                              "Opens the saved description and test results for this version.",
                               "Use this to check what the model is for before you run it or share it.",
-                            ]}
-                          />
+                              ]}
+                            />
                         </div>
                         <div className="button-with-help">
                           <button className="ghost" onClick={() => onExportModelVersion({ ...version, family_name: family.name })}>
@@ -253,7 +253,7 @@ function ModelsView({
                   {modelForm.selected_dataset_zip_file_name || "Choose dataset .zip file"}
                 </button>
                 <p className="helper">
-                  The app reads the train and test folders directly from this zip file when it needs to evaluate or fine-tune the model.
+                  The app reads the train and test folders from this zip file when it needs to evaluate or fine-tune the model.
                 </p>
               </div>
 
@@ -340,26 +340,6 @@ function ModelsView({
               <section className="model-report-section">
                 <p className="model-report-eyebrow">Description</p>
                 <p className="helper prewrap model-report-copy">{modelReport.description || "No description provided."}</p>
-              </section>
-
-              <section className="model-report-section">
-                <p className="model-report-eyebrow">Training Dataset</p>
-                <p className="helper model-report-copy"><strong>Name:</strong> {modelReport.training_dataset.name}</p>
-                <p className="helper model-report-copy"><strong>Type:</strong> {modelReport.training_dataset.dataset_format === "roboflow_zip" ? "Roboflow Zip" : "Images + Labels Folders"}</p>
-                <p className="helper model-report-copy"><strong>Zip:</strong> {modelReport.training_dataset.zip_file_path || "-"}</p>
-                <p className="helper model-report-copy"><strong>Split:</strong> {modelReport.training_dataset.split_name || "-"}</p>
-                <p className="helper model-report-copy"><strong>Images:</strong> {modelReport.training_dataset.images_dir}</p>
-                <p className="helper model-report-copy"><strong>Labels:</strong> {modelReport.training_dataset.labels_dir}</p>
-              </section>
-
-              <section className="model-report-section">
-                <p className="model-report-eyebrow">Test Dataset</p>
-                <p className="helper model-report-copy"><strong>Name:</strong> {modelReport.test_dataset.name}</p>
-                <p className="helper model-report-copy"><strong>Type:</strong> {modelReport.test_dataset.dataset_format === "roboflow_zip" ? "Roboflow Zip" : "Images + Labels Folders"}</p>
-                <p className="helper model-report-copy"><strong>Zip:</strong> {modelReport.test_dataset.zip_file_path || "-"}</p>
-                <p className="helper model-report-copy"><strong>Split:</strong> {modelReport.test_dataset.split_name || "-"}</p>
-                <p className="helper model-report-copy"><strong>Images:</strong> {modelReport.test_dataset.images_dir}</p>
-                <p className="helper model-report-copy"><strong>Labels:</strong> {modelReport.test_dataset.labels_dir}</p>
               </section>
 
               <section className="model-report-section">

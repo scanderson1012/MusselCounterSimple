@@ -1,13 +1,13 @@
 /**
  * App usage guidance page for non-technical users.
  */
-function UsageView({ visible, onOpenSharedDrive }) {
+function UsageView({ visible, onOpenSharedDrive, onOpenRoboflow, onOpenTrainingCode }) {
   return (
     <section id="usage-view" className={`view${visible ? "" : " hidden"}`}>
       <div className="run-header">
         <h1>App Usage</h1>
         <p className="run-meta-text usage-intro-text">
-          Follow these step-by-step guides to run the app, check results, manage models, and make newer versions.
+          Follow these step-by-step guides to run the app, review results, manage models, and create new model versions.
         </p>
       </div>
 
@@ -30,7 +30,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
         <div className="panel usage-panel">
           <h3 className="usage-panel-title">2. Review and Edit Detections</h3>
           <p className="helper usage-copy">
-            Review every run carefully so the saved boxes and labels are correct before they are saved for later.
+            Review each run carefully so the saved boxes and labels are correct before they are used later.
           </p>
           <ol className="usage-step-list">
             <li>Open a processed image from the run results.</li>
@@ -77,7 +77,7 @@ function UsageView({ visible, onOpenSharedDrive }) {
             Fine-Tune makes a new version of a model using reviewed images you saved earlier.
           </p>
           <ol className="usage-step-list">
-            <li>Open the Settings page and check how many reviewed images are needed and how many times the app should go through them.</li>
+            <li>Open the Settings page and check how many reviewed images are needed before Fine-Tune becomes available.</li>
             <li>Keep reviewing and finalizing runs until you have enough saved images.</li>
             <li>Wait for the app to show that Fine-Tune is available.</li>
             <li>Open the Models page and click <strong>Fine-Tune</strong> on the newest version of that model.</li>
@@ -99,6 +99,38 @@ function UsageView({ visible, onOpenSharedDrive }) {
             <li>The app downloads a zip file with the model file and its information file.</li>
             <li>Share that exported package with another user.</li>
             <li>The other user can then add it to their app with the normal Add Model steps.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div className="usage-subsection">
+        <div className="run-header usage-subsection-header">
+          <h2>Full Model Training</h2>
+          <p className="helper usage-copy">
+            Use this process when you need to make a brand-new model family, such as a model for a different mussel
+            species or age group. Try to have at least 300 labeled images before fully training a new model. More
+            labeled images are usually better.
+          </p>
+        </div>
+
+        <div className="panel usage-panel usage-drive-panel">
+          <h3 className="usage-panel-title">New Model Family Workflow</h3>
+          <ol className="usage-step-list">
+            <li>
+              Label your dataset in Roboflow. There is a video explaining how to use Roboflow in the shared drive inside
+              the <strong>Videos/Manuals</strong> folder. Refer to that for details.{" "}
+              <button type="button" className="ghost usage-link-btn" onClick={onOpenRoboflow}>
+                Link to Roboflow
+              </button>
+            </li>
+            <li>
+              After downloading the zip file that holds the labeled images from Roboflow, open the Google Colab notebook and
+              follow the directions at the top of the notebook.{" "}
+              <button type="button" className="ghost usage-link-btn" onClick={onOpenTrainingCode}>
+                Training Code
+              </button>
+            </li>
+            <li>When the notebook finishes, upload your new model and its matching dataset zip to the app with the <strong>Add Model</strong> button.</li>
           </ol>
         </div>
       </div>

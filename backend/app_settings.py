@@ -22,7 +22,7 @@ def get_app_settings(database_connection: sqlite3.Connection) -> dict[str, Any]:
     raw_settings = {str(row["setting_key"]): str(row["setting_value"]) for row in rows}
     merged = {**DEFAULT_APP_SETTINGS, **raw_settings}
     return {
-        "fine_tune_min_new_images": _parse_positive_int(merged.get("fine_tune_min_new_images"), 10),
+        "fine_tune_min_new_images": _parse_positive_int(merged.get("fine_tune_min_new_images"), 25),
         "fine_tune_num_epochs": _parse_positive_int(merged.get("fine_tune_num_epochs"), 10),
         "compute_mode": normalize_compute_mode(merged.get("compute_mode"), COMPUTE_MODE_AUTOMATIC),
         "gpu_upgrade_prompt_seen": parse_bool_setting(merged.get("gpu_upgrade_prompt_seen"), False),
@@ -35,7 +35,7 @@ def update_app_settings(database_connection: sqlite3.Connection, settings: dict[
     validated_settings = {
         "fine_tune_min_new_images": _parse_positive_int(
             settings.get("fine_tune_min_new_images", current_settings["fine_tune_min_new_images"]),
-            10,
+            25,
         ),
         "fine_tune_num_epochs": _parse_positive_int(
             settings.get("fine_tune_num_epochs", current_settings["fine_tune_num_epochs"]),

@@ -6,7 +6,7 @@ module.exports = {
     extraResource: [
       path.resolve(__dirname, "backend", "dist"),
       path.resolve(__dirname, "bundled_assets"),
-      path.resolve(__dirname, "fasterrcnn_baseline.pth"),
+      path.resolve(__dirname, "baseline_fasterrcnn_model.pth"),
     ],
   },
   makers: [

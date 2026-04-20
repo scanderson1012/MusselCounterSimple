@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 import xml.etree.ElementTree as ET
 from typing import Any
 
+import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
@@ -33,9 +35,6 @@ class PascalVOCDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, dict[str, Any]]:
         image_path, label_path = self.samples[index]
-        from PIL import Image
-        import numpy as np
-
         image = np.array(Image.open(image_path).convert("RGB"))
         boxes, labels = parse_pascal_voc_xml(label_path, self.class_name_to_id)
         return build_training_sample(
@@ -144,6 +143,7 @@ def evaluate_model_file(
 
 
 def parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) -> tuple[list[list[float]], list[int]]:
+    """Parse one Pascal VOC XML file into Faster R-CNN box/label lists."""
     boxes: list[list[float]] = []
     labels: list[int] = []
     root = ET.parse(label_path).getroot()
@@ -164,6 +164,8 @@ def parse_pascal_voc_xml(label_path: Path, class_name_to_id: dict[str, int]) -> 
         boxes.append([xmin, ymin, xmax, ymax])
         labels.append(class_name_to_id[class_name])
     return boxes, labels
+
+
 def store_model_evaluation(
     database_connection,
     model_version_id: int,

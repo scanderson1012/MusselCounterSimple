@@ -1,4 +1,9 @@
-"""Dataset source helpers for folder-pair and Roboflow zip inputs."""
+"""Dataset source helpers for folder-pair and Roboflow zip inputs.
+
+These helpers normalize the two dataset shapes the app supports:
+- legacy folder pairs (`images_dir` + `labels_dir`)
+- Roboflow export zip files containing `train`, `test`, and `valid/val`
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,8 @@ DATASET_FORMAT_ROBOFLOW_ZIP = "roboflow_zip"
 
 @dataclass(slots=True)
 class DatasetSource:
+    """Resolved dataset pointer used by training, fine-tuning, and evaluation."""
+
     dataset_format: str
     images_dir: Path | None = None
     labels_dir: Path | None = None
@@ -33,6 +40,7 @@ def create_dataset_source(
     split_name: str | None = None,
     dataset_format: str | None = None,
 ) -> DatasetSource:
+    """Validate input dataset metadata and return a normalized source object."""
     resolved_format = str(dataset_format or "").strip().lower()
     if zip_file_path:
         resolved_format = resolved_format or DATASET_FORMAT_ROBOFLOW_ZIP
@@ -62,6 +70,7 @@ def create_dataset_source(
 
 
 def resolve_roboflow_split_directory(zip_file_path: str, split_name: str) -> Path:
+    """Extract a Roboflow zip to cache and return the requested split directory."""
     zip_path = Path(zip_file_path).expanduser().resolve()
     if not zip_path.is_file():
         raise FileNotFoundError(f"Dataset zip file not found: {zip_path}")
@@ -89,6 +98,7 @@ def resolve_roboflow_split_directory(zip_file_path: str, split_name: str) -> Pat
 
 
 def list_pascal_voc_samples(dataset_source: DatasetSource) -> list[tuple[Path, Path]]:
+    """Return matching image/XML pairs for one dataset source."""
     if dataset_source.dataset_format == DATASET_FORMAT_ROBOFLOW_ZIP:
         assert dataset_source.split_dir is not None
         split_dir = dataset_source.split_dir
@@ -124,6 +134,7 @@ def list_pascal_voc_samples(dataset_source: DatasetSource) -> list[tuple[Path, P
 
 
 def dataset_record_to_source(dataset_record: dict) -> DatasetSource:
+    """Convert a DB dataset row into a validated `DatasetSource`."""
     return create_dataset_source(
         images_dir=str(dataset_record.get("images_dir") or ""),
         labels_dir=str(dataset_record.get("labels_dir") or ""),
@@ -141,6 +152,7 @@ def _validate_directory(raw_path: str | None, field_name: str) -> Path:
 
 
 def _extract_zip_to_cache(zip_path: Path) -> Path:
+    """Extract one zip into a deterministic cache directory."""
     DATASET_CACHE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     stat = zip_path.stat()
     cache_key = sha256(
@@ -152,16 +164,7 @@ def _extract_zip_to_cache(zip_path: Path) -> Path:
         return extraction_root.resolve()
 
     if extraction_root.exists():
-        for child in extraction_root.iterdir():
-            if child.is_dir():
-                for nested in sorted(child.rglob("*"), reverse=True):
-                    if nested.is_file():
-                        nested.unlink(missing_ok=True)
-                    elif nested.is_dir():
-                        nested.rmdir()
-                child.rmdir()
-            else:
-                child.unlink(missing_ok=True)
+        _clear_directory(extraction_root)
     extraction_root.mkdir(parents=True, exist_ok=True)
     with ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(extraction_root)
@@ -170,8 +173,23 @@ def _extract_zip_to_cache(zip_path: Path) -> Path:
 
 
 def _discover_dataset_root(extraction_root: Path) -> Path:
+    """Prefer a single extracted top-level folder when the zip contains one."""
     extracted_dirs = [path for path in extraction_root.iterdir() if path.is_dir()]
     extracted_files = [path for path in extraction_root.iterdir() if path.is_file() and path.name != ".extracted"]
     if len(extracted_dirs) == 1 and not extracted_files:
         return extracted_dirs[0].resolve()
     return extraction_root.resolve()
+
+
+def _clear_directory(directory: Path) -> None:
+    """Remove all children inside a cache directory while keeping the root folder."""
+    for child in directory.iterdir():
+        if child.is_dir():
+            for nested in sorted(child.rglob("*"), reverse=True):
+                if nested.is_file():
+                    nested.unlink(missing_ok=True)
+                elif nested.is_dir():
+                    nested.rmdir()
+            child.rmdir()
+        else:
+            child.unlink(missing_ok=True)

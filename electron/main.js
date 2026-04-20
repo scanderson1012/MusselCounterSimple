@@ -126,7 +126,7 @@ async function startBackendServer() {
     const backendDataDir = path.join(app.getPath("userData"), "backend");
     const packagedWorkingDirectory = process.resourcesPath;
     const bundledAssetsDir = path.join(process.resourcesPath, "bundled_assets");
-    const baselineModelPath = path.join(process.resourcesPath, "fasterrcnn_baseline.pth");
+    const baselineModelPath = path.join(process.resourcesPath, "baseline_fasterrcnn_model.pth");
 
     backendProcess = spawn(executablePath, [], {
       cwd: packagedWorkingDirectory,

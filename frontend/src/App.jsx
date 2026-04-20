@@ -55,13 +55,13 @@ function App() {
   const [isSubmittingModel, setIsSubmittingModel] = useState(false);
   const [modelReport, setModelReport] = useState(null);
   const [appSettings, setAppSettings] = useState({
-    fine_tune_min_new_images: 10,
+    fine_tune_min_new_images: 25,
     fine_tune_num_epochs: 10,
     compute_mode: "automatic",
     gpu_upgrade_prompt_seen: false,
   });
   const [draftAppSettings, setDraftAppSettings] = useState({
-    fine_tune_min_new_images: "10",
+    fine_tune_min_new_images: "25",
     fine_tune_num_epochs: "10",
     compute_mode: "automatic",
   });
@@ -185,7 +185,7 @@ function App() {
     const response = await apiGet("/settings");
     const nextSettings = response.settings || {};
     const normalizedSettings = {
-      fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || 10,
+      fine_tune_min_new_images: Number(nextSettings.fine_tune_min_new_images) || 25,
       fine_tune_num_epochs: Number(nextSettings.fine_tune_num_epochs) || 10,
       compute_mode: nextSettings.compute_mode || "automatic",
       gpu_upgrade_prompt_seen: Boolean(nextSettings.gpu_upgrade_prompt_seen),
@@ -1217,6 +1217,14 @@ function App() {
         onOpenSharedDrive={() => {
           window.desktopAPI.openExternalUrl(
             "https://drive.google.com/drive/folders/1GigNwEYUg6u1zxXWBg0SBv7gm660JccT?usp=drive_link"
+          ).catch(showErrorStatus);
+        }}
+        onOpenRoboflow={() => {
+          window.desktopAPI.openExternalUrl("https://app.roboflow.com/").catch(showErrorStatus);
+        }}
+        onOpenTrainingCode={() => {
+          window.desktopAPI.openExternalUrl(
+            "https://colab.research.google.com/drive/138iN6yJ1FAKhipb-JxtO_JC2NlgRJxOq?usp=sharing"
           ).catch(showErrorStatus);
         }}
       />
