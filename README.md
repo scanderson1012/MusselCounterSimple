@@ -97,6 +97,21 @@ The repository root folder is the folder that contains:
 
 All build commands in this README should be run from that repository root folder.
 
+## Choose Your Goal
+
+Use the section that matches what you are trying to do:
+
+- `Development on Windows`: use this if you are making code changes and want to run the app locally for testing
+- `Development on macOS/Linux`: use this if you are making code changes and want to run the app locally for testing
+- `Build Full Windows App Package`: use this if you want the portable Windows ZIP that someone can extract and run
+- `Build Full macOS App Package`: use this if you want the macOS DMG
+
+In short:
+
+- `npm start` is for development and testing changes
+- `npm run make:desktop:win` is for building the full Windows app package
+- `npm run make:desktop:mac -- --arch=arm64` is for building the full macOS app package
+
 ### Install Python And Node.js First
 
 If you have never used Python before, do this before running any commands below.
@@ -137,9 +152,11 @@ cd MusselCounterSimple
 4. Extract the ZIP.
 5. Open a terminal inside the extracted `MusselCounterSimple` folder.
 
-## Run Locally (Development on macOS/Linux)
+## Development On macOS/Linux
 
-### Download Everything
+Use these commands if you are editing the code and want to run the app locally for testing.
+
+### Set Up Development Environment
 
 ```bash
 python3 -m venv .venv
@@ -149,15 +166,17 @@ pip install -r requirements.txt
 npm ci
 ```
 
-### Start The App For Testing
+### Run The App In Development Mode
 
 ```bash
 npm start
 ```
 
-## Run Locally (Development on Windows)
+## Development On Windows
 
-### Download Everything
+Use these commands if you are editing the code and want to run the app locally for testing.
+
+### Set Up Development Environment
 
 ```powershell
 py -3 -m venv .venv
@@ -167,15 +186,25 @@ pip install -r requirements.txt
 npm ci
 ```
 
-### Start The App For Testing
+### Run The App In Development Mode
 
 ```powershell
 npm start
 ```
 
-## Build Installer Packages
+If PowerShell blocks `npm` with an `npm.ps1 cannot be loaded because running scripts is disabled on this system` error, use `npm.cmd` instead:
 
-### Build macOS `.dmg` (on macOS)
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" start
+```
+
+## Build Full App Packages
+
+Use these commands if you want to create the full distributable desktop app for other users.
+
+### Build Full macOS App Package (`.dmg`)
+
+Build this on a Mac.
 
 ```bash
 python3 -m venv .venv
@@ -187,7 +216,9 @@ npm run make:desktop:mac -- --arch=arm64
 find out/make -name "*.dmg"
 ```
 
-### Build Windows `.zip` (Portable, on Windows)
+### Build Full Windows App Package (`.zip`)
+
+Build this on Windows.
 
 ```powershell
 py -3 -m venv .venv
