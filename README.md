@@ -1,5 +1,5 @@
 # Mussel Counter
-Download: https://github.com/natewill/MusselCounterSimple/releases/tag/v1.0.0
+Download: https://github.com/scanderson1012/MusselCounterSimple/releases/tag/v1.0.0
 
 Made by the CMDA Capstone Fall 2025 and Spring 2026 teams for a CMDA capstone project under the Virginia Tech Department of Fish and Wildlife Conservation.
 
