@@ -33,34 +33,65 @@ This is the prediction output: each detected mussel gets a class label (`live` o
 
 ## App Screenshots
 
-### Home Page
+### Run Results Page
 
-This is the launch point for a run. You can add images, pick the model, set the threshold, and start processing in a few clicks, so the workflow stays practical for day-to-day lab use.
+This is the main run workspace. Users can start a new run, choose a model family and version, add microscope images, adjust the detection threshold, start a run, recalculate counts without rerunning the model, and finalize reviewed labels so corrected detections can be reused later for fine-tuning.
 
-<img src="docs/homepage.png" alt="Home Page" width="520" />
+Insert Run Results page screenshot here
 
-### After A Run
+### Prediction History Page
 
-After the model finishes, the app summarizes outcomes across the run, including total images and live/dead counts, so users can move from raw image sets to clear results quickly.
+This page shows previous runs so users can reopen an older run, inspect its images, and review the saved results without losing historical context.
 
-<img src="docs/after-run.png" alt="After A Run" width="520" />
+Insert Prediction History page screenshot here
 
-### Bounding Boxes After Run
+### Image Review And Editing
 
-This view overlays predicted bounding boxes directly on the image, which makes the model behavior transparent and easy to audit instead of treating predictions like a black box.
+This view is where users audit model results image-by-image. They can toggle bounding boxes, relabel detections, delete incorrect detections, and add brand-new bounding boxes for mussels the model missed. This is the main human-in-the-loop review step before saving corrected data for future model improvement.
 
-<img src="docs/bounding-boxes-after-run.png" alt="Bounding Boxes After Run" width="520" />
+Insert Image Review and Editing screenshot here
 
-### Image Edit
+### Models Page
 
-This edit view keeps a human in the loop: you can correct labels or delete incorrect detections, and those edits persist in the database for reliable historical tracking.
+The Models page shows every saved model family and version in the app. Users can add a new model with its matching dataset zip, open model information, evaluate a version on its saved test set, fine-tune the newest version when enough reviewed images are available, export a model for sharing, and delete non-baseline models when needed.
 
-<img src="docs/image-edit.png" alt="Image Edit" width="520" />
+Insert Models page screenshot here
+
+### Add Model Workflow
+
+When adding a model, the app asks for the model file, the matching Roboflow dataset zip, a model name, a description, and optional notes. This keeps model files tied to the data they came from so evaluation and later fine-tuning work correctly.
+
+Insert Add Model modal screenshot here
+
+### Model Information And Evaluation
+
+Each model version has a saved information view that includes the description and evaluation metrics such as mAP, precision, and recall. This helps users compare versions and choose the right model for a run.
+
+Insert Model Information screenshot here
+
+### Settings Page
+
+The Settings page controls two important app behaviors: how many reviewed images are required before fine-tuning becomes available, and whether the app should use automatic compute, CPU only, or GPU if available. On compatible Windows machines, the app can also enable the optional GPU runtime from here.
+
+Insert Settings page screenshot here
+
+### Usage Page
+
+The Usage page gives in-app guidance for the full workflow, including running models, reviewing detections, finalizing reviewed labels, evaluating models, fine-tuning, exporting models, and the broader training and sharing process used by the team.
+
+Insert Usage page screenshot here
 
 ## Prerequisites
 
-- Node.js 20+
-- Python 3.11+
+For downloading and running the packaged desktop app:
+
+- Windows 10 or Windows 11 for the Windows ZIP
+- macOS for the macOS DMG
+
+For opening the app during development from this repository:
+
+- Node.js 20 or newer
+- Python 3.11 or newer
 
 ## Installer Downloads
 
@@ -71,92 +102,21 @@ Download the installer package that matches your operating system from the lates
 
 The desktop installers include:
 
-- the bundled baseline model `baseline_fasterrcnn_model`
-- the bundled baseline training dataset
-- the bundled baseline test dataset
+- the bundled baseline model family `baseline_fasterrcnn_model`
+- the bundled baseline model file `baseline_fasterrcnn_model.pth`
+- the bundled baseline training dataset `baseline_train`
+- the bundled baseline test dataset `baseline_test`
 
 Current limitation:
 
-- macOS currently runs on CPU only. Optional GPU runtime support is implemented for Windows only.
+- macOS currently runs on CPU only
+- optional GPU runtime support is implemented for Windows only
 
-## Build From This Repository
+## Open The App During Development
 
-If you are building the app yourself instead of downloading a release asset, do these steps first:
+Run these commands from the repository root, which is the folder that contains `package.json`, `backend`, `frontend`, and `electron`.
 
-1. Install Python 3.
-2. Install Node.js 20 or newer.
-3. Download or clone this repository to your computer.
-4. Open a terminal in the repository root folder.
-
-The repository root folder is the folder that contains:
-
-- `package.json`
-- `backend`
-- `frontend`
-- `electron`
-
-All build commands in this README should be run from that repository root folder.
-
-## Choose Your Goal
-
-Use the section that matches what you are trying to do:
-
-- `Development on Windows`: use this if you are making code changes and want to run the app locally for testing
-- `Development on macOS/Linux`: use this if you are making code changes and want to run the app locally for testing
-- `Build Full Windows App Package`: use this if you want the portable Windows ZIP that someone can extract and run
-- `Build Full macOS App Package`: use this if you want the macOS DMG
-
-In short:
-
-- `npm start` is for development and testing changes
-- `npm run make:desktop:win` is for building the full Windows app package
-- `npm run make:desktop:mac -- --arch=arm64` is for building the full macOS app package
-
-### Install Python And Node.js First
-
-If you have never used Python before, do this before running any commands below.
-
-#### Windows
-
-1. Install Python 3 from: `https://www.python.org/downloads/windows/`
-2. During the Python installer, make sure you check the box:
-   `Add Python to PATH`
-3. Finish the Python installation.
-4. Install Node.js 20 or newer from: `https://nodejs.org/`
-5. Open a new PowerShell window after both installs finish.
-
-#### macOS
-
-1. Install Python 3 from: `https://www.python.org/downloads/macos/`
-2. Install Node.js 20 or newer from: `https://nodejs.org/`
-3. Open a new Terminal window after both installs finish.
-
-### Clone The Repository
-
-Use one of these two options:
-
-#### Option 1: Clone with Git
-
-If you already have Git installed, run:
-
-```bash
-git clone https://github.com/scanderson1012/MusselCounterSimple.git
-cd MusselCounterSimple
-```
-
-#### Option 2: Download the ZIP
-
-1. Open: `https://github.com/scanderson1012/MusselCounterSimple`
-2. Click the green `Code` button.
-3. Click `Download ZIP`.
-4. Extract the ZIP.
-5. Open a terminal inside the extracted `MusselCounterSimple` folder.
-
-## Development On macOS/Linux
-
-Use these commands if you are editing the code and want to run the app locally for testing.
-
-### Set Up Development Environment
+### macOS
 
 ```bash
 python3 -m venv .venv
@@ -164,179 +124,105 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 npm ci
-```
-
-### Run The App In Development Mode
-
-```bash
 npm start
 ```
 
-## Development On Windows
-
-Use these commands if you are editing the code and want to run the app locally for testing.
-
-### Set Up Development Environment
+### Windows
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-npm ci
-```
-
-### Run The App In Development Mode
-
-```powershell
-npm start
-```
-
-If PowerShell blocks `npm` with an `npm.ps1 cannot be loaded because running scripts is disabled on this system` error, use `npm.cmd` instead:
-
-```powershell
+py -3 -m venv ".venv"
+& ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
+& ".\.venv\Scripts\python.exe" -m pip install -r "requirements.txt"
+& "C:\Program Files\nodejs\npm.cmd" ci
 & "C:\Program Files\nodejs\npm.cmd" start
 ```
 
-## Build Full App Packages
-
-Use these commands if you want to create the full distributable desktop app for other users.
-
-### Build Full macOS App Package (`.dmg`)
-
-Build this on a Mac.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt -r requirements-build.txt
-npm ci
-npm run make:desktop:mac -- --arch=arm64
-find out/make -name "*.dmg"
-```
-
-### Build Full Windows App Package (`.zip`)
-
-Build this on Windows.
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt -r requirements-build.txt
-npm ci
-npm run make:desktop:win
-```
-
-If PowerShell blocks `npm` with an `npm.ps1 cannot be loaded because running scripts is disabled on this system` error, use `npm.cmd` instead:
-
-```powershell
-& "C:\Program Files\nodejs\npm.cmd" ci
-& "C:\Program Files\nodejs\npm.cmd" run make:desktop:win
-```
-
-Windows ZIP output will be under:
-
-```text
-out\make\zip\win32\...
-```
-
-To use it, extract the ZIP on Windows and run `mussel-counter-simple.exe` from the extracted folder.
-
-To create a desktop shortcut on Windows, right-click `mussel-counter-simple.exe` and choose `Send to` -> `Desktop (create shortcut)`. Keep the full extracted app folder together and do not move only the `.exe` by itself.
-
-### Optional Windows GPU Runtime Build
-
-The default Windows installer is CPU-first. To include the optional NVIDIA GPU runtime in the Windows build, prepare a second build environment with the GPU requirements and build the GPU backend before running the Windows packaging command.
-
-Detailed commands are in [docs/INSTALLER_BUILD.md](docs/INSTALLER_BUILD.md).
+If your PowerShell execution policies block script-based commands like `npm.ps1`, use the quoted `npm.cmd` form shown above. If virtual environment activation is blocked too, the direct `python.exe` path shown above avoids that issue.
 
 ## How To Use The App
 
-### Add A Model
+### 1. Start A New Run
 
-To add a model in the app, click `Add Model` in the top-right, then select your `.pt` or `.pth` file.
+The app opens on the Run Results page. Click `Start New Run`, choose the model family and version you want to use, then click `Add Images` to load microscope images into the current run.
 
-Current support is limited to PyTorch RCNN models.
+### 2. Run A Model On Images
 
-On first launch, the app already includes the bundled `baseline_fasterrcnn_model` together with its matching training and test datasets.
+After choosing a model and adding images, click `Start Run`. The app processes the images and saves live and dead mussel detections for the run.
 
-### Run Page (Home Page)
+### 3. Adjust The Threshold
 
-The home page is the `Run` page, where you run the model.
+Each detection has a confidence score. The threshold controls which detections count toward the live and dead totals and which boxes stay visible in the image review pages.
 
-1. Click `Add Images` to select the images you want to process.
-2. Choose the model you want to run.
-3. Click `Start Run` to run the model.
-4. After the model finishes, adjust the threshold slider if needed and click `Recalculate`.
+- Lower thresholds keep more detections
+- Higher thresholds keep only more confident detections
+- `Recalculate` updates counts using the saved detections without rerunning the model
 
-### Threshold Slider
+### 4. Review And Edit Detections
 
-Each RCNN detection (bounding box) has a confidence score for its predicted class (`live` or `dead`).
+Open any image from a run to review detections in detail.
 
-- Default behavior is a threshold of `0.5` (50% confidence).
-- Increasing the threshold (for example, `0.9`) keeps only high-confidence detections.
-- Lowering the threshold (for example, `0.2` or `0.3`) includes lower-confidence detections.
+In the image review page, you can:
 
-The threshold controls what is included in:
+- toggle bounding boxes on and off
+- relabel a detection from `live` to `dead` or from `dead` to `live`
+- delete a detection that should not be there
+- add a new bounding box when the model missed a mussel
 
-- live/dead mussel counts
-- displayed image bounding boxes
+This step is important because reviewed detections can later be reused to improve a model.
 
-For example, at `0.9`, detections below 90% confidence are excluded from counts and hidden from the image view.
+### 5. Finalize Reviewed Labels
 
-### Editing Detections
+After finishing review for a run, go back to the Run Results page and click `Finalize Reviewed Labels`. This saves the reviewed detections into the replay buffer for the model version that created the run.
 
-After a run finishes, click an image to review and edit detections.
+Those saved reviewed images and detections are what the app uses later for fine-tuning.
 
-- You can click an existing bounding box and change its class (`live` <-> `dead`).
-- You can delete an existing bounding box.
-- You currently cannot add new bounding boxes (not supported yet).
+### 6. Review Older Runs
 
-Edits are persisted in the SQL database, so they remain saved over time.
+Open the `Prediction History` page to revisit previous runs. You can reopen a run, inspect its images, and review the saved results later.
 
-### View History Page
+### 7. Add A New Model
 
-The `View History` page shows previous runs (prediction history).
+Open the `Models` page and click `Add Model`.
 
-For each run, the app stores details in SQL, including:
+To register a model, the app currently expects:
 
-- images included in the run
-- live/dead counts
-- model used
-- threshold and run configuration
+- a model file in `.pth` or `.pt` format
+- the matching Roboflow dataset `.zip` used to create that model
+- a model name
+- a description
+- optional notes
 
-You can review past runs and adjust threshold values for those runs as needed.
+The bundled baseline model family `baseline_fasterrcnn_model` is already included on first launch.
 
-## Edit The Database (Terminal)
+### 8. Evaluate A Model On Its Test Set
 
-The database uses SQL with SQLite.
+On the `Models` page, click `Evaluate on Test Set` for the model version you want to check. The app uses that model version's saved test dataset and records evaluation metrics so you can compare model quality later.
 
-Quick terminal usage:
+### 9. Fine-Tune The Latest Model Version
 
-```bash
-# while in /MusselCounterSimple
-sqlite3 app_data/app.db
-```
+The app can create a new model version from reviewed images that were saved through `Finalize Reviewed Labels`.
 
-Inside the SQLite prompt:
+Fine-tuning becomes available when the newest version of a model has enough saved reviewed images based on the setting in the `Settings` page. When that threshold is reached, the app shows that fine-tuning is available.
 
-```sql
-.tables
-SELECT * FROM runs LIMIT 10;
-SELECT * FROM run_images LIMIT 10;
-SELECT * FROM detections LIMIT 10;
-```
+To fine-tune:
 
-Example edit:
+1. Open `Settings` and confirm the fine-tuning thresholds you want.
+2. Keep reviewing runs and finalizing reviewed labels until enough images have been saved.
+3. Open `Models`.
+4. Click `Fine-Tune` on the newest version of the model family.
 
-```sql
-UPDATE runs SET threshold_score = 0.6 WHERE id = 1;
-```
+When fine-tuning finishes, the app creates a new version of that model.
 
-Exit SQLite:
+### 10. Export And Share A Model
 
-```sql
-.quit
-```
+On the `Models` page, click `Export` for a model version to save it as a shareable zip file. Another user can then add that exported model to their own copy of the app.
+
+### 11. Configure Compute Settings
+
+Open the `Settings` page to choose:
+
+- `Automatic`
+- `CPU only`
+- `GPU if available`
+
+If the app is running on a compatible Windows machine and the optional GPU runtime is installed, users can enable GPU acceleration there. If GPU is not available or not ready, the app still falls back to CPU.
