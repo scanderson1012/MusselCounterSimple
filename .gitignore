@@ -18,7 +18,9 @@ app_data/
 
 # Backend build artifacts
 backend/build/
+backend/build_gpu/
 backend/dist/
+backend/dist_gpu/
 *.spec
 
 # Large local model weights
@@ -29,6 +31,3 @@ backend/dist/
 
 # Local test images
 /testmusselimages copy/
-
-backend/build_gpu/
-backend/dist_gpu/
