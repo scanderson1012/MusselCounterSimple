@@ -139,6 +139,55 @@ py -3 -m venv ".venv"
 
 If your PowerShell execution policies block script-based commands like `npm.ps1`, use the quoted `npm.cmd` form shown above. If virtual environment activation is blocked too, the direct `python.exe` path shown above avoids that issue.
 
+## Build Desktop Packages
+
+Use these steps when you want to create distributable app packages instead of just opening the app in development mode.
+
+### macOS Build
+
+Build this on a Mac.
+
+```bash
+python3 -m venv .venv-build
+source .venv-build/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt -r requirements-build.txt
+npm ci
+npm run make:desktop:mac -- --arch=arm64
+```
+
+The built DMG will be created under `out/make/`.
+
+### Windows Build
+
+Build this on Windows.
+
+```powershell
+py -3 -m venv ".venv-build"
+& ".\.venv-build\Scripts\python.exe" -m pip install --upgrade pip
+& ".\.venv-build\Scripts\python.exe" -m pip install -r "requirements.txt" -r "requirements-build.txt"
+& "C:\Program Files\nodejs\npm.cmd" ci
+& "C:\Program Files\nodejs\npm.cmd" run make:desktop:win
+```
+
+The built ZIP will be created under `out\make\`.
+
+If your PowerShell execution policies block script-based commands like `npm.ps1`, use the quoted `npm.cmd` form shown above. If virtual environment activation is blocked too, the direct `python.exe` path shown above avoids that issue.
+
+### Optional Windows GPU Build
+
+If you want the Windows package to include the optional GPU runtime too, build the GPU backend first and then rerun the Windows packaging step.
+
+```powershell
+py -3 -m venv ".venv-build-gpu"
+& ".\.venv-build-gpu\Scripts\python.exe" -m pip install --upgrade pip
+& ".\.venv-build-gpu\Scripts\python.exe" -m pip install -r "requirements-gpu-win.txt" -r "requirements-build.txt"
+& "C:\Program Files\nodejs\npm.cmd" run backend:build:gpu:win
+& "C:\Program Files\nodejs\npm.cmd" run make:desktop:win
+```
+
+This produces one Windows app package that still works on CPU-only machines, while also allowing GPU acceleration on compatible Windows systems.
+
 ## How To Use The App
 
 ### 1. Start A New Run
